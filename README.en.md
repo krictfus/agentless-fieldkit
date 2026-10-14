@@ -49,6 +49,11 @@ environment it was developed and measured in:
 > Image ID / digest / sha256 are recorded in `container/IMAGE-PROVENANCE.md`; measurements
 > (single-host end-to-end, three-layer funnel 138 s → 21 s, etc.) are in `docs/DESIGN.md`, section 5.
 
+> **The repository and the delivery package are not the same thing**: `container/ansible-2.9.tar.gz`,
+> real `conf/hosts/*.conf`, `payload/collect.sh`, `output/` and `tmp/` all belong to the **delivery package**
+> (what you carry to the site) and are **not committed** (see `.gitignore`). The repository only holds
+> publicly shareable code and docs; the 139 MB image tarball travels with the package or as a Release asset.
+
 ---
 ## 1. What problem does it solve?
 
@@ -127,6 +132,7 @@ files themselves; if you need machine-readable data, that is the payload author'
 .
 ├── README.md / README.en.md   Chinese (authoritative) / English
 ├── LICENSE  CONTRIBUTING.md  .github/ISSUE_TEMPLATE/
+├── SECURITY.md                 security policy: what to report and how
 ├── run.sh                     the only entry point
 ├── bootstrap.sh               idempotent control-node preparation
 ├── selftest.sh                offline self-test (no hosts required)
@@ -178,6 +184,21 @@ Control node (Linux + podman)
 
 Measured on a mixed scenario (2 reachable + 1 wrong password + 1 unreachable): **21 s**, versus
 **138 s** with the funnel disabled.
+
+### The container image is pluggable too
+
+The framework is decoupled from "the thing that does the work": the payload is replaceable and so is the
+**control-node image**. The image shipped here is just *my* first implementation — any image that satisfies
+the contract (Ansible / runs as root with `HOME=/root` / openssh-client / Debian-family so sshpass can be
+injected / works with the existing mounts) can replace it; change the `image:` line in
+`ansible/podman-compose.yml`. The contract and the easiest migration order are in `docs/DESIGN.md` 3.8.
+
+> **Multiple segments**: every `*.conf` under `conf/hosts/` is loaded and merged into a single run, so
+> "one file per segment" can be executed together (as long as the control node can reach those segments).
+> The discussion of "plug into the upstream switch/router and reach several segments at once", and what is
+> deliberately not done (route discovery, bastion / ProxyJump), is in `docs/DESIGN.md` 3.9.
+
+---
 
 ## 5. Why not just use an existing tool? (comparison)
 
@@ -272,7 +293,10 @@ established trust).
 ## 9. License, contributing, third-party
 
 - **License**: MIT — see [`LICENSE`](LICENSE).
-- **Contributing**: issues and PRs are welcome; please read [`CONTRIBUTING.md`](CONTRIBUTING.md) first
+- **Security**: please read [`SECURITY.md`](SECURITY.md) first (the security model and what we do not accept as a report)
+- **Contributing**: issues and PRs are welcome; please read [`CONTRIBUTING.md`](CONTRIBUTING.md) first —
+  its opening section, "**minimal change first**", explains the rule: making existing features better is
+  welcome, but every new feature has to justify itself, because **this tool's value comes from how small it is**
   (it lists the changes we deliberately do **not** accept, with reasons).
 
 | Component | Source | License | Notes |

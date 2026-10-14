@@ -128,6 +128,7 @@ agentless-fieldkit/
 ├── VERSION
 ├── LICENSE                    MIT
 ├── CONTRIBUTING.md             贡献指南（含「明确不接受的改动」）
+├── SECURITY.md              安全策略：欢迎报告什么、怎么报告
 ├── .github/ISSUE_TEMPLATE/     issue 模板（bug / feature）
 ├── lib/
 │   ├── host_var.sh            唯一的路径来源 + 清单加载 + parse_host + 漏斗开关
@@ -160,6 +161,10 @@ agentless-fieldkit/
 └── tmp/                       中间产物（inventory、套接字目录，自动创建）
 ```
 
+> **「仓库」和「交付包」不是一回事**：`container/ansible-2.9.tar.gz`、真实 `conf/hosts/*.conf`、
+> `payload/collect.sh`、`output/`、`tmp/` 都属于**交付包**（跟着你带去现场的那份东西），**不进仓库**（见 `.gitignore`）。
+> 仓库里只放可公开的代码与文档；139 MB 的镜像 tar 走 Release 附件或随包携带。
+
 ---
 
 ## 4. 工作原理
@@ -179,7 +184,7 @@ run.sh
  └─ podman-compose down
 ```
 
-四个关键设计：
+五个关键设计：
 
 1. **载荷可替换**：工具只负责"注入与回收"，真正干活的是 `payload/collect.sh`。
    换脚本不用改任何代码，契约见 `payload/README.md`。
@@ -192,6 +197,15 @@ run.sh
    （`UNREACHABLE` / `AUTH_FAILED`）并写明原因。
    实测：**2 台可达 + 1 台认证失败 + 1 台不可达**这个组合，旧版 138 秒，新版 **21 秒**。
    临时跳过预检：`bash run.sh --no-precheck`。
+
+5. **容器也是可替换的一层**：框架与"干活的东西"解耦——载荷可换，**控制端镜像同样可换**。
+   本仓库给的镜像只是我做的第一个实现；任何满足契约（Ansible / root 且 `HOME=/root` / openssh /
+   Debian 系以便注入 sshpass / 配合现有挂载）的镜像都能替换它，改 `ansible/podman-compose.yml` 的 `image:` 一行即可。
+   契约与"最省事的替换顺序"见 `docs/DESIGN.md` 3.8。
+
+> **多网段**：`conf/hosts/` 下**所有 `*.conf` 都会被加载**并合并成一次任务，
+> 所以"一个网段一份文件"可以直接一起跑（前提是控制机自己可达那些网段）。
+> 关于"接在上层交换机/路由器上一次打穿多网段"的讨论，以及明确不做的事（路由发现、跳板机/ProxyJump），见 `docs/DESIGN.md` 3.9。
 
 ---
 
@@ -302,7 +316,10 @@ run.sh
 ## 10. 许可、贡献与第三方组件
 
 - **License**：MIT，见 [`LICENSE`](LICENSE)
-- **贡献**：欢迎 issue / PR。请先读 [`CONTRIBUTING.md`](CONTRIBUTING.md)（其中列了**明确不接受的改动**及理由）；
+- **安全**：安全问题请先读 [`SECURITY.md`](SECURITY.md)（含本工具的安全模型与"不接受的报告"）
+- **贡献**：欢迎 issue / PR。请先读 [`CONTRIBUTING.md`](CONTRIBUTING.md)——
+  第一节就是「**最小化变动优先**」：欢迎"让现有功能更好用"的改动，但每加一个功能都要先问
+  "它会不会让操作者多学一样东西"，因为**这个工具的价值来自它有多小**；其中也列了**明确不接受的改动**及理由；
   Bug 模板在 `.github/ISSUE_TEMPLATE/`
 - **第三方组件**：
 
