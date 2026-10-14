@@ -3,6 +3,8 @@
 # bootstrap.sh —— 在全新的 Linux 控制机上一键准备运行环境（幂等）
 #   用法: bash bootstrap.sh [--install]
 #     --install : 缺少 podman / podman-compose / sshpass 时自动调用包管理器安装
+#                 注意：--install 需要网络；离线/隔离现场请勿携带该参数
+#                 （正确用法：先在联网环境带着 --install 准备好，再拔网线带去现场）
 #   做四件事：检查命令 → 建目录 → 加载镜像 → 跑 selftest.sh
 # ============================================================
 set -uo pipefail

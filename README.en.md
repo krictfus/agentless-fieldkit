@@ -77,8 +77,21 @@ credential recycling — is handled by the framework.
 
 ## 2. Quick start (30 seconds)
 
+### 0. Prepare before you go (do this once, **where you have network access**)
+
+The site is usually **offline**, so the flow is "**prepare online, then unplug and carry it there**":
+
 ```bash
-# 1) Prepare the control node (once, or whenever you move to a new machine)
+bash bootstrap.sh --install                    # 1) install dependencies (podman / podman-compose / sshpass) — needs network
+podman load -i container/ansible-2.9.tar.gz    # 2) load the control-node image (the 139 MB tarball travels with the package)
+bash selftest.sh                               # 3) if this passes, the package is ready for the site
+```
+
+**Once you are on site**: just run `bash bootstrap.sh` (**without `--install`**) and `bash selftest.sh`;
+nothing in that path needs network. Step 1 above is the only step that ever needs it.
+
+```bash
+# 1) Prepare the control node (once, or whenever you move to a new machine; --install needs network)
 bash bootstrap.sh            # add --install to let it install podman/podman-compose/sshpass
 
 # 2) Fill in the host list (plain data lines — no shell syntax needed)

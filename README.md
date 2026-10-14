@@ -71,8 +71,21 @@ trained operator. MIT licensed.
 
 ## 2. 30 秒上手
 
+### 〇、现场前的准备（**在有网的环境做一次**）
+
+现场通常是**没有网络**的，所以流程是「**先联网准备，再拔网线带过去**」：
+
 ```bash
-# 1) 准备环境（首次，或换到新控制机时）
+bash bootstrap.sh --install                    # 1) 装依赖（podman / podman-compose / sshpass）—— 这一步需要网络
+podman load -i container/ansible-2.9.tar.gz    # 2) 导入控制端镜像（139 MB 的 tar 随包携带）
+bash selftest.sh                               # 3) 通过 = 现场可以直接用
+```
+
+**到现场之后**：只跑 `bash bootstrap.sh`（**不要带 `--install`**）和 `bash selftest.sh`，全程不依赖网络。
+整条流程里唯一需要联网的就是上面第 1 步。
+
+```bash
+# 1) 准备环境（首次，或换到新控制机时；--install 需要网络，离线现场请勿携带该参数）
 bash bootstrap.sh              # 只检查并给出提示
 bash bootstrap.sh --install    # 缺 podman / podman-compose / sshpass 时自动安装
 
