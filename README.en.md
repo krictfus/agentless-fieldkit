@@ -54,6 +54,79 @@ environment it was developed and measured in:
 > (what you carry to the site) and are **not committed** (see `.gitignore`). The repository only holds
 > publicly shareable code and docs; the 139 MB image tarball travels with the package or as a Release asset.
 
+### Network connectivity: when the control node runs inside a VMware VM (important)
+
+> Only **VMware** is covered here (that is all the author has used). If your control node is a physical Linux
+> box that can already reach the target segment, skip this section. The single goal: **the control node inside
+> the VM must be able to reach port 22 of the machines on the target segment.**
+
+**Why this needs its own section.** Everything this tool does is an **outbound SSH connection** from the
+control node — it never listens on any port and nobody connects to it — so it works as long as the control
+node can *see* the target segment. When the control node is a VM, that is exactly the step people get stuck
+on: bridged to the wrong adapter, wrong subnet, or an adapter that is simply not "connected".
+
+#### 1. Windows + VMware Workstation (the author's measured setup)
+
+1. **Start VMware Workstation as administrator every time** — otherwise changes in the Virtual Network
+   Editor silently fail to take effect because of permissions.
+2. **Edit → Virtual Network Editor** → create a dedicated `VMnet` (e.g. VMnet2), set it to **Bridged**, and
+   explicitly **bridge it to the wired NIC** that has the cable in it.
+   ⚠️ **Do not leave it on "Automatic"**: when the host has both Wi-Fi and Ethernet, automatic bridging can
+   pick Wi-Fi — the symptom is "the VM has internet, but cannot ping anything in the machine room".
+   (Note: in bridged mode the `VMware Network Adapter VMnetN` adapters in Windows are **not** involved —
+   what must be enabled and connected is the **physical wired NIC**; you do not set an IP on the VMnet adapter.)
+3. **VM settings → Network Adapter**: choose **Bridged**, select that VMnet, and tick **both**
+   "Connected" and "Connect at power on" — the most commonly missed step.
+4. **Give the VM an address in the same subnet**:
+   - machine-room segments usually have **no DHCP** → configure a **static IP** (same subnet, same prefix;
+     a gateway is normally unnecessary because the segment has no exit);
+   - if there is DHCP → `dhclient`, or `nmcli con up <name>`;
+   - ⚠️ **check that the address is free before you pick it** (`ping -c1 <candidate>`, or ask on site),
+     otherwise you create an IP conflict;
+   - moving to another segment means changing the static IP; on DHCP use `dhclient -r && dhclient`.
+5. **Verify reachability with the framework's own probe**:
+
+```bash
+ip -4 addr show                                          # the address must belong to the target segment
+ip route
+timeout 3 bash -c 'exec 3<>/dev/tcp/10.0.0.5/22' && echo "port 22 reachable" || echo "not reachable"
+```
+
+   The last command is exactly what funnel layer 1 (`lib/precheck.sh`) does — if it succeeds, `run.sh` almost
+   certainly will too.
+
+#### 2. Should you disable the firewall and SELinux? No — and it is not recommended
+
+- The tool only makes **outbound SSH connections** and the control node **listens on no port**, so there is
+  nothing to open or close in the firewall for it;
+- In the author's measured environment `firewalld` was inactive and SELinux was **Disabled**, so behaviour
+  with them **enabled has not been verified**. If you hit a problem with `firewalld` running or SELinux in
+  `Enforcing` mode, check these first:
+
+```bash
+systemctl status firewalld              # is the firewall blocking something
+getenforce                              # is SELinux Enforcing
+dmesg | grep -i denied | tail           # or: ausearch -m avc -ts recent
+```
+
+  The most likely spot is the container bind mount of `$HOME/.ssh` (SELinux type `ssh_home_t`). If that is the
+  problem, fix it with `:z` / `:Z` or a relabel — **not** by turning SELinux off. Please open an issue if you
+  hit it; the conclusion will be added to `docs/DESIGN.md`.
+
+#### 3. Other common traps
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| VM has internet but cannot reach machine-room devices | bridged to Wi-Fi / wrong bridge target | redo step 2 and bridge to the wired NIC |
+| no adapter, or it shows "not connected" | "Connected" not ticked in VM settings | tick "Connected" and "Connect at power on" |
+| changing bridge settings has no effect | VMware not started as administrator | restart elevated and change it again |
+| breaks after moving to another segment | still the old static IP / DHCP lease not renewed | change the static IP, or `dhclient -r && dhclient` |
+| odd behaviour while a VPN is up on the host | the VPN takes over routing, so bridging is no longer a direct link | disconnect the VPN temporarily, or use another control machine |
+| ping works but port 22 does not | sshd not running / firewall on the target | that is the target side; the framework reports `UNREACHABLE` |
+
+> The author's host split: **Wi-Fi for internet, the wired NIC dedicated to the machine-room segment** — the
+> two do not interfere.
+
 ---
 ## 1. What problem does it solve?
 
@@ -81,6 +154,8 @@ credential recycling — is handled by the framework.
 - `run.log` — the full Ansible run.
 
 ## 2. Quick start (30 seconds)
+
+> Running the control node inside a **VMware VM**? **Read the "Network connectivity" subsection at the end of this section first** — nothing works until that does.
 
 ### 0. Prepare before you go (do this once, **where you have network access**)
 
