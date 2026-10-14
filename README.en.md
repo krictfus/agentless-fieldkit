@@ -129,30 +129,46 @@ files themselves; if you need machine-readable data, that is the payload author'
 ## 3. Repository layout
 
 ```
-.
-├── README.md / README.en.md   Chinese (authoritative) / English
-├── LICENSE  CONTRIBUTING.md  .github/ISSUE_TEMPLATE/
-├── SECURITY.md                 security policy: what to report and how
-├── run.sh                     the only entry point
-├── bootstrap.sh               idempotent control-node preparation
-├── selftest.sh                offline self-test (no hosts required)
-├── VERSION                    change history
+agentless-fieldkit/
+├── README.md                  Chinese main version (authoritative)
+├── README.en.md               English translation
+├── run.sh                     the only entry point: checks → pre-check → start container → push key → execute → summarise → recycle → stop container
+├── bootstrap.sh               idempotent control-node preparation (supports --install)
+├── selftest.sh                offline self-test / post-migration acceptance test (no hosts needed)
+├── VERSION                    change history (Chinese)
+├── LICENSE                    MIT
+├── CONTRIBUTING.md            contribution guide (incl. "changes we do not accept")
+├── SECURITY.md                security policy: what to report and how
+├── .github/ISSUE_TEMPLATE/    issue templates (bug / feature)
 ├── lib/
-│   ├── host_var.sh            single source of paths + host list loading + funnel switches
-│   ├── precheck.sh            funnel layer 1 — TCP fast probe
-│   ├── push_key.sh            funnel layer 2 — parallel one-shot key push
-│   ├── cleanup_key.sh         key recycling (with failure protection)
-│   ├── run_playbook.sh        inventory generation + in-container execution + auto summary
-│   └── summary.sh             five-category classification + funnel statistics + hints
-├── payload/                   payload contract + example payload (your collect.sh goes here)
-├── conf/hosts/                host lists (only *.conf is loaded; template ends in .template)
-├── container/                 control-node image + injectable packages + provenance record
-├── ansible/                   ansible.cfg / vars.yml / playbook.yml / podman-compose.yml
+│   ├── host_var.sh            single source of paths + host-list loading + parse_host + funnel switches
+│   ├── precheck.sh            funnel layer 1: TCP fast probe (64 in parallel), drops unreachable hosts
+│   ├── push_key.sh            funnel layer 2: parallel key push; auth failures go to push.fail
+│   ├── cleanup_key.sh         public-key recycling (credential lifecycle, with failure protection)
+│   ├── run_playbook.sh        inventory generation + in-container execution + automatic summary
+│   └── summary.sh             five result categories (incl. AUTH_FAILED) + funnel stats + hints
+├── payload/
+│   ├── README.md              the payload contract (read this before swapping a payload)
+│   ├── collect.example.sh     minimal example payload (whoami)
+│   └── collect.sh             ← put your own / the client's script here (not committed)
+├── conf/
+│   └── hosts/
+│       ├── example.conf.template   template (only *.conf is loaded)
+│       └── *.conf                  real host lists: one file = one segment / password group
+├── container/
+│   ├── ansible-2.9.tar.gz     control-node image for podman load (travels with the package, not the repo)
+│   ├── sshpass_1.09-1_amd64.deb    package injected into the container on demand
+│   └── IMAGE-PROVENANCE.md    image provenance and verification record
+├── ansible/
+│   ├── ansible.cfg
+│   ├── vars.yml
+│   ├── playbook.yml
+│   └── podman-compose.yml
 ├── docs/
-│   ├── DESIGN.md              design philosophy and per-module rationale (Chinese)
+│   ├── DESIGN.md              design philosophy and per-module rationale
 │   └── 故障排查.md             troubleshooting manual (Chinese)
 ├── output/                    per-run results (auto-created)
-└── tmp/                       intermediate state (auto-created)
+└── tmp/                       intermediate state (inventory, socket dir; auto-created)
 ```
 
 ## 4. How it works
@@ -290,7 +306,12 @@ established trust).
   is deliberately single-file; use the self-extracting pattern when you need multiple files.
 - **Can I skip the pre-check?** `bash run.sh --no-precheck`.
 
-## 9. License, contributing, third-party
+## 9. Recent changes
+
+The full changelog lives in [`VERSION`](VERSION) and is kept in **Chinese** — this project's Chinese
+documentation is the authoritative version. Highlights of the current release (**3.4.0**): non-root support,
+the development and verification environment section, and the documented offline preparation workflow.
+## 10. License, contributing, third-party
 
 - **License**: MIT — see [`LICENSE`](LICENSE).
 - **Security**: please read [`SECURITY.md`](SECURITY.md) first (the security model and what we do not accept as a report)
@@ -317,7 +338,7 @@ established trust).
 
 ---
 
-## 10. About me / about this project
+## 11. About me / about this project
 
 - I was **25 years old** when I wrote this tool.
 - My study path is still **classic Linux operations** — I have not touched cloud computing yet.
