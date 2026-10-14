@@ -114,3 +114,65 @@ out="${1:?用法: bash collect.sh <输出文件路径>}"
 [ -s "$out" ] || { echo "载荷未生成有效产物" >&2; exit 3; }
 exit 0
 ```
+---
+
+## English summary — the payload contract
+
+**Positioning**: this is a *payload injection framework*. Orchestration, delivery, execution, retrieval and
+cleanup belong to the framework; what the payload actually *does* is up to `payload/collect.sh`. Swap the
+payload and the same tool runs a different batch task (inspection, log harvesting, patch distribution, …).
+
+**How to plug one in**
+
+```bash
+cp /path/to/your-script.sh payload/collect.sh
+chmod +x payload/collect.sh
+```
+
+`run.sh` refuses a missing or empty payload and prints its line count plus the first 12 hex digits of its
+sha256, so you can confirm which script actually ran. To exercise the whole chain first, use
+`cp payload/collect.example.sh payload/collect.sh`.
+
+**The contract — all of it must hold**
+
+| Item | Rule |
+|---|---|
+| Invocation | `bash /tmp/collect.sh <absolute artifact path>` (decided by the playbook) |
+| Argument | `$1` = absolute path of the artifact file, e.g. `/tmp/10.0.0.5_report.html` |
+| Success | exit code `0` **and** the file at `$1` exists and is non-empty |
+| Artifact name | decided by the framework (`ansible/vars.yml: artifact_suffix`) — do not rename it yourself |
+| Target dependencies | `bash` only; no network access, no installing software |
+| Payload shape | **a single file** (see below) |
+| Timeout | must finish within `ansible/vars.yml: script_timeout` (default 300 s) |
+| Side effects | nothing on the target beyond the `$1` artifact; no system configuration changes |
+
+**Modular payloads — a payload must be one file.** Directory payloads are deliberately unsupported: the
+contract holds together only because it is three rules (argument, exit code, non-empty artifact), and every
+structural assumption would narrow it while turning "zero residue" from "delete one file" into "recursively
+delete a directory". If you need several files, use one of:
+
+1. **functions in one file** with a `main` that calls them (recommended, no extra machinery);
+2. **self-extracting**: embed the sub-scripts (heredoc / `base64` / `tar`) and unpack them into `mktemp -d`,
+   with a `trap` that always cleans up — use this when you genuinely need multiple files;
+3. **external dependencies** that already exist on the target (the framework does not ship them).
+
+The framework itself never changes. For reference, the collection script actually used in the field is a
+**single file of 1500+ lines** — one file is plenty.
+
+**Paths**: the payload is invoked as `bash /tmp/collect.sh <artifact>`, so the current working directory is
+*not* the script's directory (relative paths to sibling files will fail). Use:
+
+```bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+```
+
+and prefer `${BASH_SOURCE[0]}` over `$0` — when a script is sourced, `$0` is the parent script.
+
+**Common pitfalls**
+
+| Symptom | Cause | What to do |
+|---|---|---|
+| `PAYLOAD_NO_ARTIFACT` in `summary.txt` | the payload exited 0 but never wrote `$1` | check that it actually writes to `$1` |
+| `PAYLOAD_FAILED rc=N` | the payload's own exit code was non-zero | run it manually on the target to locate the failure |
+| the whole host is `FAILED` while SSH is fine | the payload relied on a command the target does not have | probe for the command inside the payload and degrade gracefully |
+| `MISSING` in the output | the host never appeared in `PLAY RECAP` (inventory not generated or limited) | check `conf/hosts/*.conf` and `tmp/hosts.ini` |
