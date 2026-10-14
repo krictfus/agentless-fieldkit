@@ -1,0 +1,72 @@
+---
+# ============================================================
+# ansible/playbook.yml —— 清旧残留 → 推送载荷 → 执行并校验契约 → 拉回产物 → 收尾清理
+#
+#   契约校验：载荷退出码非 0、或未产出非空产物时，留下 PAYLOAD_FAILED /
+#             PAYLOAD_NO_ARTIFACT 标记，供 lib/summary.sh 打印诊断提示
+#   清理：整段用 block / always 包裹，保证**失败路径也会清理目标机**
+#   不使用 play 级 ignore_errors（会把失败计入 ignored 而非 failed，导致分类失真）
+#
+#   设计理由见 docs/DESIGN.md 3.5
+# ============================================================
+- name: 批量任务执行
+  hosts: all
+  gather_facts: no
+  ignore_unreachable: yes
+
+  become: yes
+  become_method: sudo
+
+  vars_files:
+    - vars.yml
+
+  tasks:
+    - block:
+        # ---------- 前置清理：清掉目标机旧残留 ----------
+        - name: 清理目标机旧残留
+          file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - "{{ remote_script }}"
+            - "{{ remote_output_dir }}/{{ inventory_hostname }}{{ artifact_suffix }}"
+
+        # ---------- 推送载荷 ----------
+        - name: 推送载荷到目标机
+          copy:
+            src: "{{ playbook_dir }}/../payload/collect.sh"
+            dest: "{{ remote_script }}"
+            mode: '0755'
+
+        # ---------- 执行载荷并校验契约 ----------
+        - name: 执行载荷
+          shell: |
+            timeout {{ script_timeout }} bash {{ remote_script }} {{ remote_output_dir }}/{{ inventory_hostname }}{{ artifact_suffix }} >/dev/null 2>&1
+            rc=$?
+            if [ "$rc" -ne 0 ]; then
+              echo "PAYLOAD_FAILED rc=$rc"
+              exit "$rc"
+            fi
+            if [ ! -s "{{ remote_output_dir }}/{{ inventory_hostname }}{{ artifact_suffix }}" ]; then
+              echo "PAYLOAD_NO_ARTIFACT: 载荷退出码为 0，但没有生成非空产物文件"
+              exit 9
+            fi
+          register: collect_result
+
+        # ---------- 拉回产物 ----------
+        - name: 拉回产物文件
+          fetch:
+            src: "{{ remote_output_dir }}/{{ inventory_hostname }}{{ artifact_suffix }}"
+            dest: "{{ output_dir }}/"
+            flat: yes
+          when: collect_result is succeeded
+
+      # ---------- 无论成功失败都要清理目标机本次文件 ----------
+      always:
+        - name: 收尾清理：清掉目标机本次文件
+          file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - "{{ remote_script }}"
+            - "{{ remote_output_dir }}/{{ inventory_hostname }}{{ artifact_suffix }}"

@@ -1,0 +1,16 @@
+---
+# ============================================================
+# ansible/vars.yml —— 批量任务变量
+#   只放"目标机上的路径"和通用配置；主机清单由 ansible-playbook -i 传入
+#   载荷契约见 payload/README.md
+# ============================================================
+
+# 目标机上的临时路径
+remote_script: /tmp/collect.sh
+remote_output_dir: /tmp
+
+# 产物文件名后缀（inventory_hostname 在 task 里拼）
+artifact_suffix: "_report.html"
+
+# 单台执行超时（秒），防止载荷在某台机器卡死
+script_timeout: 300

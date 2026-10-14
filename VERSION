@@ -1,0 +1,75 @@
+3.4.0
+
+# ========== 3.4.0（当前） ==========
+# [改进] 支持非 root 用户运行：
+#        · 本地临时密钥 /root/.ssh/... → $HOME/.ssh/...（lib/host_var.sh）
+#        · 容器挂载 → ${HOME}/.ssh:/root/.ssh:ro；run.sh 生成"生效版 compose"时一并替换 ${HOME}
+#          （延续"不依赖 podman-compose 插值"的做法）
+#        · push_key.sh 确保密钥目录存在且权限 700
+#        · 容器内仍是 root，因此 ansible.cfg 里的 /root/... 无需改动（宿主 $HOME/.ssh 映射到容器 /root/.ssh）
+#  [实测] RHEL 8.4 + rootless podman 3.0.2（fuse-overlayfs 1.4.0 / slirp4netns 1.1.8）：
+#        普通用户跑通离线自检与单台端到端，产物归属当前用户，全程无需 sudo
+# [新增] README 第 0 节「前言：开发与验证环境」：VMware Workstation 17.0.0 / RHEL 8.4 (4.18.0-305) /
+#        podman 3.0.2-dev / sshpass 1.09 / 容器 Ubuntu 20.04.6 LTS + Ansible 2.9.27
+
+# ========== 3.3.0 ==========
+# [对外化] 整理为公开版本：脱敏（本地路径、实验机 IP、雇主措辞"公司 → 业务方"）；
+#          补 LICENSE(MIT) / CONTRIBUTING.md / .github issue 模板 / 英文摘要与 README.en.md /
+#          授权与合规声明 / 第三方组件许可说明（sshpass .deb 等）/ docs/DESIGN.md（设计理念与逐模块理由）；
+#          移除个人向 docs/Git入门.md 与 docs/实战记录.md；注释改造为"只描述行为与契约"（代码零改动）
+
+# ========== 3.2.0 ==========
+# [定位] 明确"零技能门槛作战包"定位：不需要常驻服务器/数据库/预置凭据，有 podman 就能跑；
+#        并在 README 新增第 5 节"为什么不直接用现成的方案"——列出 Ansible 原生 / pdsh·clush /
+#        Spug / AWX·Semaphore / 蓝鲸 JOB / Jenkins 的**前提条件**逐项对比。
+#        结论写进文档：本框架不是"更好的 Spug"，而是"无平台可依赖时的现场作战包"；
+#        差异在约束组合与交付形态，不在功能；环境里已有平台就该直接用它们。
+#        （这条边界同时是面试必问题的答案：把"造轮子"翻译成"清楚边界的设计判断"）
+# ========== 3.1.0 ==========
+# [新增] 三层漏斗（快速失败）：lib/precheck.sh（TCP 快探，并行 64）+ 公钥下发（并行 16）
+#        + 只对下发成功的主机执行任务；summary.sh 新增 AUTH_FAILED 分类与"漏斗统计"，
+#        并把每台被剔除主机的原因写进 summary.txt；run.sh 新增 --no-precheck 开关
+# [修复] cleanup_key.sh 改为只回收"本次真的下发过公钥"的主机（tmp/push.ok）：
+#        此前会对全部清单尝试回收，导致从未触碰的不可达主机被记成"回收失败"，
+#        误触发"保留私钥"保护 —— 私钥会一直留在控制机上（实测遇到过）
+# [优化] 公钥下发由串行改为并行（PUSH_PARALLEL），预检与下发不再被少数失败主机拖住
+# [实测] 三层漏斗验收（RHEL 8.4 + podman 3.0.2；4 台 = 2 可达 + 1 认证失败 + 1 不可达）：
+#        预检剔除 1 台 → 下发剔除 1 台 → 实际执行 2 台；总耗时 21 秒（同场景旧版 138 秒）；
+#        不可达主机在下发阶段出现 0 次、认证失败主机只尝试 1 次，两者均未进入 ansible；
+#        私钥按预期删除（cleanup 只回收真正下发过的主机，不再误判"回收失败"）
+# [措辞] 全框架输出改为"任务"口径，不再预设载荷是"资产采集"：
+#        "机房资产采集 / 采集完成 / 采集阶段 / 报告文件"
+#          → "批量任务 / 任务执行完成 / 执行阶段 / 产物文件"；
+#        playbook 的 play 名改为"批量任务执行"；载荷面向的变量改为 artifact_suffix / remote_output_dir
+# [移除] 删除 ledger.sh：框架只输出 summary.txt（漏斗统计 + 五分类 + 被剔除原因），
+#        不再额外生成 CSV 与 index.html —— 一次任务只留一份汇总，避免重复产物与多一份维护面。
+#        "不做内容级汇总（解析载荷产物格式）"这一判断不变：那会给载荷作者加约定，
+#        或逼框架做格式兼容，与"载荷可替换 + 最小化变更"冲突。
+
+# ========== 3.0.0（相对内部 v2 版本） ==========
+# [结构] 交付包形态：lib/ payload/ conf/ container/ ansible/ docs/
+#        · 所有脚本不再硬编码控制机绝对路径，路径由 lib/host_var.sh 反推
+#        · 容器采用"同路径挂载"：宿主机路径 = 容器内路径，包放哪都能跑
+# [修复] P0-1 主机清单占位符 → conf/hosts/*.conf 自动加载（模板 *.conf.template 不加载）
+# [修复] P0-2 变量先用后定义 → run.sh 先取路径再 source 再 mkdir
+# [修复] P0-3 公钥回收不解析端口 → parse_host + ssh -p；回收失败保留私钥并给失败清单
+# [修复] P0-4 载荷契约缺失 → run.sh 校验非空并打印 sha256；playbook 执行后校验产物，
+#        缺产物打 PAYLOAD_NO_ARTIFACT；summary.sh 输出诊断提示
+# [修复] P1-1 无 trap → run.sh 注册 trap（EXIT/INT/TERM），清理成为必然路径
+# [修复] P1-2 inventory 明文口令 → chmod 600
+# [修复] P1-3 sshpass -p → sshpass -e（口令不进 argv）
+# [修复] P1-4 ansible.cfg 配置段错位 → pipelining / ssh_args / control_path 移入
+#        [ssh_connection]；套接字目录改到可写挂载 /var/run/ansible-cp
+# [修复] P1-5 forks=5 → 20
+# [修复] P2-1 结果分类只认 IPv4 → 主机名/IPv6 可识别，并新增 MISSING 分类
+# [修复] P2-5 输出目录时间戳到秒，避免同分钟互相覆盖
+# [修复] cleanup_key.sh 缺 mkdir -p tmp（tmp 缺失时会误删私钥）
+# [修复] main.sh 清理执行两次 → 显式清理后置 KEY_CLEANED=1，trap 只兜底
+# [修复] 前置检查重复两块 → 合并为一处
+# [修复] 去掉 play 级 ignore_errors（会把失败计入 ignored，导致分类失真）
+# [修复] apt 专属提示 → 按发行版给出 dnf/apt/zypper 提示
+# [清理] 注释中的"WSL 主机"改为"控制机"；去掉对不存在的 setup_ansible.sh 的引用
+# [新增] README.md / payload/README.md / selftest.sh / bootstrap.sh /
+#        container/IMAGE-PROVENANCE.md / docs/ / .gitignore / VERSION
+# [设计] 结果汇总只做"作业层"（主机清单 + summary.txt + 产物文件），不做"内容级汇总"：
+#        后者必须解析载荷产物格式，会带来兼容负担或额外约定，违背最小化变更与载荷可替换。

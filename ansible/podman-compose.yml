@@ -1,0 +1,30 @@
+---
+# ============================================================
+# ansible/podman-compose.yml —— 控制端容器
+#   · 基础镜像只提供 Ansible 2.9，不预装额外工具
+#   · 需要的额外工具（如 sshpass）由 run.sh 从 container/ 挂载后临时注入
+#   · ${PKG_ROOT} 由 run.sh 替换为交付包的实际绝对路径（生成"生效版" compose）
+#   · 采用"宿主机路径 = 容器内路径"的同路径挂载，因此无需写死任何绝对路径
+#
+#   设计理由见 docs/DESIGN.md 3.7 与 3.1
+# ============================================================
+version: '3.8'
+
+services:
+  ansible-dev:
+    image: krictfus/ansible:2.9
+    network_mode: host
+    container_name: ansible_workspace
+    user: root
+    volumes:
+      - ${PKG_ROOT}:${PKG_ROOT}
+      - ${HOME}/.ssh:/root/.ssh:ro
+      - /etc/hosts:/etc/hosts:ro
+      # 宿主 ${HOME}/.ssh 映射到容器 /root/.ssh（容器内始终是 root，
+      # 因此 ansible.cfg 里的 /root/.ssh/... 无需改动）；非 root 用户因此也能运行。
+      # SSH 多路复用套接字目录（容器内 /root/.ssh 只读，不能放套接字）
+      - ${PKG_ROOT}/tmp/ansible-cp:/var/run/ansible-cp
+    working_dir: ${PKG_ROOT}
+    tty: true
+    stdin_open: true
+    command: /bin/bash
