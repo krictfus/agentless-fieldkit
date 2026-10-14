@@ -1,0 +1,15 @@
+# 真实主机清单：不入库、不外发
+conf/hosts/*.conf
+!conf/hosts/example.conf.template
+
+# 载荷：业务方/他人的脚本，跟着交付包走但不入库
+payload/collect.sh
+
+# 运行产物与中间状态
+output/
+tmp/
+result.log
+*.swp
+
+# 大文件镜像（按需单独传递）
+container/*.tar.gz
