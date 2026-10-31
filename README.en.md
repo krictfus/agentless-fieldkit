@@ -1,4 +1,4 @@
-# Payload-pluggable Batch Task Runner
+# Zero-Skill Field Kit (Payload-pluggable Batch Task Runner)
 
 > A **zero-skill-threshold field kit** for batch operations in "no-platform" environments:
 > no admin, no credential inventory, no management platform, isolated network, heterogeneous
@@ -22,8 +22,10 @@
 
 ## 0. Environment (where this was built and verified)
 
-Any Linux box with **podman** that can SSH to the targets will run this. For reference, here is the
-environment it was developed and measured in:
+Any Linux box with **podman** that can SSH to the targets will run this — any control node short of
+unusual configurations should work, provided you supply those conditions yourself. If you need to build
+that environment, `bootstrap.sh` prepares the dependencies for you (see section 2). For reference, here
+is the environment it was developed and measured in:
 
 | Layer | Component | Version |
 |---|---|---|
@@ -186,6 +188,14 @@ cp /path/to/company-script.sh payload/collect.sh
 bash run.sh
 ```
 
+Three rules for the host list — getting them wrong raises no error, it only makes hosts fail
+authentication for no visible reason:
+
+- **A password may contain `#`**, but **must not contain spaces** (fields are whitespace-separated);
+- Write a trailing comment as **whitespace + `#`** (e.g. `10.0.0.5 root pw # note`); a `#` glued to
+  the password is part of the password;
+- The file can be edited with Windows Notepad (CRLF is handled); just do not pad the password with spaces.
+
 **Want to test the whole chain without a real payload?** Use the example payload against a machine
 you can SSH into:
 
@@ -241,6 +251,7 @@ agentless-fieldkit/
 │   └── podman-compose.yml
 ├── docs/
 │   ├── DESIGN.md              design philosophy and per-module rationale
+│   ├── REVIEW.md              code review and fix record (findings / root causes / verification)
 │   └── 故障排查.md             troubleshooting manual (Chinese)
 ├── output/                    per-run results (auto-created)
 └── tmp/                       intermediate state (inventory, socket dir; auto-created)

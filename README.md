@@ -1,11 +1,11 @@
-# 批量任务执行框架 · 载荷可替换（零技能门槛的现场作战包）
+# 零技能门槛的现场工具包（批量任务执行框架 · 载荷可替换）
 
 > 面向"三无"机房（**无管理员、无密码台账、无运维环境**）的批量任务注入与执行框架。
 > 编排、下发、执行、回收、汇总都由框架负责，**做什么任务由载荷（`payload/collect.sh`）决定**。
 > 用它来盘点资产是常见用法之一，但不是唯一用法。
 > 一条命令、改两个文件就能用；目标机零残留；**换一份载荷就能用于别的批量任务**。
 >
-> **一句话定位**：给"没有任何平台可依赖的现场"用的**零技能门槛作战包**——
+> **定位**：给"没有任何平台可依赖的现场"用的**零技能门槛工具包**——
 > 不需要常驻服务器、不需要数据库、不需要预置凭据，有 `podman` 就能跑；
 > 操作者只需要改两个文本文件、敲一条命令。
 >
@@ -15,13 +15,14 @@
 >
 > 📄 **Full English README: [README.en.md](README.en.md)**（中文版 `README.md` 为权威版本）
 
-**English summary** — A payload-pluggable batch task runner for isolated, "no-platform" environments.
+**English summary** — A zero-skill field kit: a payload-pluggable batch task runner for isolated, "no-platform" environments.
 One command pushes an ephemeral SSH key, injects your own script, runs it across many heterogeneous
 hosts, pulls back one artifact per host, classifies the result, and leaves **zero residue** on the
 targets. It needs **no server, no database and no pre-existing trust**: credentials live in a plain
 list file, are used once, and are burned afterwards. It is **not** a replacement for Ansible AWX,
 Semaphore, Spug, Puppet Bolt or OliveTin — those assume a platform, pre-provisioned credentials and a
-trained operator. MIT licensed.
+trained operator. Any reasonably standard Linux control node works, and a bundled `bootstrap.sh`
+prepares the dependencies. MIT licensed.
 
 > ⚠️ **授权与合规声明**：本工具支持"明文口令清单 + 批量 SSH 执行"，其形态与内网扫描工具同构。
 > **仅可用于你拥有明确授权的目标主机**；禁止用于未授权测试、扫描或任何非法用途。
@@ -32,7 +33,9 @@ trained operator. MIT licensed.
 
 ## 0. 前言：开发与验证环境
 
-别人的环境只要满足"**有 podman 的 Linux + 能 SSH 到目标机**"就能跑。下面是我开发和实测用的环境，供你对照：
+别人的环境只要满足"**有 podman 的 Linux + 能 SSH 到目标机**"就能跑。
+非极端条件下的Linux控制节点应当都可以实现、自备该条件，如果需要构建该环境，我也准备了bootstrap.sh环境准备脚本，具体请查看第二节。
+下面是我开发和实测用的环境，供你对照：
 
 | 层次 | 组件 | 版本 |
 |---|---|---|
@@ -174,7 +177,7 @@ dmesg | grep -i denied | tail           # 或 ausearch -m avc -ts recent，看�
   **最可能出问题的一处**是容器挂载 `$HOME/.ssh`（SELinux 上下文 `ssh_home_t`）。
   真要遇到，优先用 `:z` / `:Z` 或调整标签解决，**而不是把 SELinux 关掉**；遇到请开 issue，我会把结论补进 `docs/DESIGN.md`。
 
-#### 三、其他容易踩的
+#### 三、其他容易错的
 
 | 现象 | 原因 | 处理 |
 |---|---|---|
@@ -229,6 +232,7 @@ agentless-fieldkit/
 │   └── podman-compose.yml
 ├── docs/
 │   ├── DESIGN.md              设计理念与逐模块设计理由
+│   ├── REVIEW.md              代码评审与修复记录（问题/根因/验证）
 │   └── 故障排查.md            排障手册
 ├── output/                    每次运行的结果目录（自动创建）
 └── tmp/                       中间产物（inventory、套接字目录，自动创建）
@@ -282,7 +286,7 @@ run.sh
 
 ---
 
-## 5. 为什么不直接用现成的方案（同类工具对比）
+## 5. 为什么不直接用现成的方案
 
 > 这大概是拿到这份包的人第一个会问的问题。**答案写在这里，不用你猜。**
 > 结论先给：**单点几乎都有人做过；空白在于"凭据不可预置 + 零技能操作者"这个组合。**
@@ -314,7 +318,7 @@ run.sh
 | **中文交付包 + 自检 + 镜像可核验** | 文档多 | ❌ | ❌ | 部分 | ❌ | **✅** |
 | 容器钉版本控制端 | ✅ 官方 EE | — | 单文件天然 | 官方镜像 | — | ✅（**非首创**） |
 
-### 5.3 三个"已经有人做过"的单点（主动承认，不装原创）
+### 5.3 三个"已经有人做过"的单点
 
 | 本框架的某个做法 | 已有实现 | 差别在哪 |
 |---|---|---|
@@ -325,7 +329,7 @@ run.sh
 **空白在哪**：单点几乎全被占，但**没有任何一个现成方案同时具备"凭据不可预置 + 零技能操作者"**——
 因为大工具的设计前提里，这两件事不会同时出现（它们假设操作者是专业运维、且信任关系已建立）。
 
-### 5.4 结论与边界（明牌）
+### 5.4 结论与边界
 
 > 它们都假设你**已经有一台服务器、一套平台、一份可用的凭据**；
 > 本框架假设这三样**都没有**——现场只有一台笔记本、一根网线，操作者只会 `cd` / `vim`。
@@ -406,7 +410,7 @@ run.sh
 | `container/sshpass_1.09-1_amd64.deb` | Debian 项目（sshpass 1.09-1, amd64） | GPL-2.0-or-later | 仅为**离线/隔离网络**环境提供便利（有网时也可用发行版包管理器安装）。版权归原作者与 Debian 项目所有 |
 | 控制端镜像（**未随仓库分发**） | 自行构建：Ubuntu 20.04.6 + Ansible 2.9.27 | 镜像内 Ansible 为 GPLv3 | 仓库不含镜像 tar（见 `.gitignore`）。构建与校验方式见 `container/IMAGE-PROVENANCE.md` |
 
-- **一句说明（比"致谢"更准确）**：第 5 节列出的那些同类方案（Puppet Bolt、pyinfra、pdsh/clush、
+- **一句说明**：第 5 节列出的那些同类方案（Puppet Bolt、pyinfra、pdsh/clush、
   Spug、AWX/Semaphore、蓝鲸 JOB、OliveTin 等）是我**在工具做完之后**才去了解和对比的 ——
   写它的时候我并不知道有这些现成方案，所以那节**没有任何"参考设计"的意思，只是一次事后调研**
   （当时是为了回答自己一个问题：这东西还有存在的必要吗？）。
@@ -426,7 +430,7 @@ run.sh
 - **代码与文本等内容借助 AI 编写和整理**（模型：DeepSeek Harness 的 V41-Flash），
   但**理念、架构这类东西是我自己定义的**；
 - 因为希望把自己的思考过程传达出来，所以注释和 README 我尽量写得**详细、白话**；
-- 我英文不好，所以**注释全是中文**；`README.en.md` 是翻译出来的 ——
+- 我英文不好，所以**注释全是中文**；`README.en.md` 同样是通过AI整理、翻译出来的 ——
   **翻得不好的地方，希望能得到指正和完善**；
 - 开这个仓库的目的是**交流、得到指导，以促进个人成长**；
 - **我刚开始学用 GitHub，用得很不熟练**（git 命令也只会最基本的那几条）。所以这是我第一次

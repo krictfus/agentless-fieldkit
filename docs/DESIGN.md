@@ -340,3 +340,20 @@ password is used only during key push and key recycling — seconds instead of t
 **No better answer yet — suggestions are welcome.** If you can reduce plaintext exposure *without* adding
 dependencies or asking the operator to type anything extra, please open an issue: this is probably the most
 worthwhile weak spot in this tool.
+
+**§3.11 — credentials are identified by the key itself, not by a comment tag (v3.4.1).** Key push and key
+recycling used to match on a fixed comment tag (`ansible_temp`). A tag is something a human types, not an
+identity, and it failed silently twice: a stale same-tag key on the target made the push stage report
+"already present" (the run then failed at execution and was classified `FAILED` instead of `AUTH_FAILED`),
+and two concurrent runs deleted each other's key. Matching now uses the public-key body (the base64 field)
+for both detection and removal, with `grep -vF` deleting exactly one line; the tag remains only as a
+human-readable comment. Recycling also checks that `authorized_keys` exists first — "no file" means
+"nothing to recycle", not "recycling failed" — and after a push the framework performs one real
+password-less login, because "the key was written" is not the same as "the key works". Residual note: when
+only the tag is left (manual re-run after the private key was deleted), recycling falls back to tag matching.
+
+**§3.11.1 — host-list parsing assumes nothing about the operator's editor or password.** A trailing `\r`
+is stripped first (Windows Notepad produces CRLF, and an un-stripped `\r` lands in the sudo password and
+surfaces as `FAILED`); only a `#` at the start of a line or after whitespace starts a comment (passwords
+such as `P@ss#2024` are common, and truncating at the first `#` made them fail as `AUTH_FAILED`); passwords
+may not contain spaces, which is part of the contract and is now documented.
