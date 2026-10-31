@@ -159,6 +159,15 @@ credential recycling — is handled by the framework.
 
 > Running the control node inside a **VMware VM**? **Read the "Network connectivity" subsection at the end of this section first** — nothing works until that does.
 
+**Getting the package**: with git, just clone it; without git (or if you want a versioned snapshot), use the tag archive:
+
+```bash
+wget https://github.com/krictfus/agentless-fieldkit/archive/refs/tags/v3.4.1.tar.gz
+tar xzf v3.4.1.tar.gz && cd agentless-fieldkit-3.4.1
+```
+
+The image is **not** in the source archive (excluded by `.gitignore`); download it separately from [Releases](https://github.com/krictfus/agentless-fieldkit/releases) — its sha256 is in the release notes and in `container/IMAGE-PROVENANCE.md`.
+
 ### 0. Prepare before you go (do this once, **where you have network access**)
 
 The site is usually **offline**, so the flow is "**prepare online, then unplug and carry it there**":

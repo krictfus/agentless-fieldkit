@@ -76,6 +76,15 @@ prepares the dependencies. MIT licensed.
 
 > 控制端跑在 **VMware 虚拟机**里？**先看本节末尾的「网络打通」**——这一步不通，后面全都白搭。
 
+**怎么拿到这份包**：有 git 就 `git clone`；没有 git（或想要带版本号的快照）就用 tag 源码包：
+
+```bash
+wget https://github.com/krictfus/agentless-fieldkit/archive/refs/tags/v3.4.1.tar.gz
+tar xzf v3.4.1.tar.gz && cd agentless-fieldkit-3.4.1
+```
+
+镜像**不在**源码包里（`.gitignore` 已排除），从 [Releases](https://github.com/krictfus/agentless-fieldkit/releases) 单独下载；sha256 见 Release 说明与 `container/IMAGE-PROVENANCE.md`。
+
 ### 〇、现场前的准备（**在有网的环境做一次**）
 
 现场通常是**没有网络**的，所以流程是「**先联网准备，再拔网线带过去**」：
