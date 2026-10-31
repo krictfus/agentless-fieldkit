@@ -94,7 +94,15 @@ bash bootstrap.sh --install    # 缺 podman / podman-compose / sshpass 时自动
 # 2) 填主机清单（纯数据行，不需要懂 bash 语法）
 cp conf/hosts/example.conf.template conf/hosts/seg10.conf
 vi conf/hosts/seg10.conf       # 一行一台：IP[:端口] 用户名 密码 [sudo密码] 可查看example.conf.template预设格式
+```
 
+清单书写规则（三条，写错不会报错、只会让主机"莫名其妙认证失败"）：
+
+- **口令里可以含 `#`**，但**不能含空格**（字段以空白分隔）；
+- 行尾注释要写成「**空白 + `#`**」（如 `10.0.0.5 root pw # 备注`）；紧贴在口令后面的 `#` 会被当成口令的一部分；
+- 用 Windows 记事本编辑也可以（CRLF 会被自动处理）；但**不要**在口令首尾加空格。
+
+```bash
 # 3) 放入载荷（业务方提供的执行脚本）
 cp /path/to/company-script.sh payload/collect.sh
 
@@ -375,6 +383,11 @@ run.sh
 - **v3.3.0**：整理为对外版本——脱敏（去掉本地路径与实验机 IP、雇主措辞中性化）、
   补 `LICENSE`(MIT) / `CONTRIBUTING.md` / issue 模板 / 英文摘要 / 授权与合规声明；
   移除个人向的 `docs/Git入门.md`（留在作者私人工作区）。
+- **v3.4.1**：代码评审修复 6 项"静默出错"的缺陷（**功能未变**）：产物计数不再写死载荷文件名、
+  清单解析支持口令含 `#` 与 Windows CRLF、公钥回收改为按公钥本体精确删除且先判断文件存在、
+  下发后增加一次真实免密登录验证、输出目录加 PID 防同秒碰撞。
+  新增 [`docs/REVIEW.md`](docs/REVIEW.md)（问题清单 / 根因 / 修复 / 验证 / 已知残留），
+  并在 `selftest.sh` 增加 [7] 清单解析规则断言。
 
 ---
 

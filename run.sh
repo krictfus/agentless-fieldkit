@@ -191,8 +191,11 @@ echo ""
 info "本次结果文件列表"
 if [ -n "$LATEST_OUTPUT" ] && [ -d "$LATEST_OUTPUT" ]; then
     ls -l "$LATEST_OUTPUT"
-    FILE_COUNT=$(find "$LATEST_OUTPUT" -maxdepth 1 -name '*_report.html' 2>/dev/null | wc -l)
-    ok "共拉回 $FILE_COUNT 份产物"
+    # 不按产物文件名统计（P0-1）：`*_report.html` 是载荷自己的约定，写死在这里
+    # 就等于框架去猜产物格式，违反设计原则 8；改名 suffix 后还会静默显示 0。
+    FILE_COUNT=$(find "$LATEST_OUTPUT" -maxdepth 1 -type f \
+        ! -name 'run.log' ! -name 'summary.txt' 2>/dev/null | wc -l)
+    ok "共拉回 $FILE_COUNT 份文件（不含 run.log / summary.txt）"
     if [ -f "$LATEST_OUTPUT/summary.txt" ]; then
         echo ""
         echo "----- summary.txt -----"

@@ -49,6 +49,13 @@ PROJECT_DIR="$PKG_ROOT"
 # conf/hosts/ 下每个 *.conf 为一个分组/网段，内容为纯数据行（不是 bash 语法）：
 #     # 注释     或     IP[:端口]  用户名  SSH密码  [sudo密码]
 # 模板文件名是 *.conf.template，不会被加载（防止示例 IP 被当成真实目标）。
+#
+# 三条解析规则（P0-2 / P0-3，详见 docs/REVIEW.md）：
+#   1) 先剥行尾 CRLF——现场常用 Windows 记事本编辑，末字段会带 \r，
+#      不剥会让 sudo 密码变成 "xxx\r"，主机表现为 FAILED 而不是 AUTH_FAILED；
+#   2) 只有「行首」或「空白之后」的 # 才是注释——口令里允许出现 #（如 p#ss），
+#      早先的 `${_line%%#*}` 会把口令从 # 处截断，同样伪装成 AUTH_FAILED；
+#   3) 口令里不能含空格（字段以空白分隔，这是清单契约的一部分）。
 HOSTS=()
 for _f in "$HOSTS_DIR"/*.conf; do
     [ -f "$_f" ] || continue
@@ -56,7 +63,11 @@ for _f in "$HOSTS_DIR"/*.conf; do
         example.conf) continue ;;     # 兼容误命名：示例文件永不参与任务
     esac
     while IFS= read -r _line || [ -n "$_line" ]; do
-        _line="${_line%%#*}"
+        _line="${_line%$'\r'}"                  # 规则 1：剥 CRLF
+        case "$_line" in
+            ''|'#'*) continue ;;                # 空行 / 整行注释
+        esac
+        _line="${_line%%[[:space:]]#*}"         # 规则 2：只认「空白 + #」
         [ -z "${_line//[[:space:]]/}" ] && continue
         HOSTS+=("$_line")
     done < "$_f"

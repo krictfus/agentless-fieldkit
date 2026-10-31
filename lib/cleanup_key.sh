@@ -17,6 +17,21 @@ mkdir -p "$TMP_DIR"
 FAILED_LIST="$TMP_DIR/cleanup_failed.txt"
 : > "$FAILED_LIST"
 
+# 公钥本体（P0-4 / P1-2）：按「公钥」精确删除，不按注释标签整段删。
+#   · 早先 `sed -i '/ansible_temp/d'` 会把并发实例的 key 一起删掉；
+#   · 目标机从来没有 authorized_keys 时，sed 会报错，被误判成「回收失败」，
+#     进而触发「保留私钥」保护——一次假失败就把私钥长期留在控制机上。
+KEY_BODY=""
+if [ -f "${KEY_PATH}.pub" ]; then
+    KEY_BODY="$(awk '{print $2}' "${KEY_PATH}.pub")"
+fi
+if [ -n "$KEY_BODY" ]; then
+    REMOTE_REMOVE="f=~/.ssh/authorized_keys; [ -f \"\$f\" ] || exit 0; grep -vF -- '$KEY_BODY' \"\$f\" > \"\$f.rea-tmp\" 2>/dev/null; mv -f \"\$f.rea-tmp\" \"\$f\"; chmod 600 \"\$f\"; ! grep -qF -- '$KEY_BODY' \"\$f\""
+else
+    # 兜底：本地私钥已被删、只剩标签可依据时（手工重跑场景）
+    REMOTE_REMOVE="f=~/.ssh/authorized_keys; [ -f \"\$f\" ] || exit 0; grep -v '$KEY_TAG' \"\$f\" > \"\$f.rea-tmp\" 2>/dev/null; mv -f \"\$f.rea-tmp\" \"\$f\"; chmod 600 \"\$f\"; ! grep -q '$KEY_TAG' \"\$f\""
+fi
+
 # 既没有下发记录、也没有本地私钥 → 本次什么都没做，直接结束
 if [ ! -f "$PUSH_OK_FILE" ] && [ ! -f "$KEY_PATH" ]; then
     echo "[*] 无下发记录且无本地临时密钥，无需回收"
@@ -40,7 +55,7 @@ clean_remote() {
         -o PreferredAuthentications=password \
         -o PubkeyAuthentication=no \
         "$user@$ip" \
-        "sed -i '/$KEY_TAG/d' ~/.ssh/authorized_keys" 2>/dev/null
+        "$REMOTE_REMOVE" 2>/dev/null
     then
         echo "[OK-CLEAN] $ip:$port" | tee -a "$LOG_FILE"
     else

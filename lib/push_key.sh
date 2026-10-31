@@ -22,6 +22,14 @@ chmod 600 "$KEY_PATH" "$KEY_PATH.pub"
 : > "$PUSH_OK_FILE"
 : > "$PUSH_FAIL_FILE"
 
+# 公钥本体（base64 那段，不含注释）——用于「按公钥精确识别」而不是按标签识别。
+# 为什么要它：`authorized_keys` 里可能有同标签但已过期的公钥，按标签判断会把
+# 「其实登不上」误判为「已下发」（P1-1，见 docs/REVIEW.md）。
+KEY_BODY=""
+if [ -f "${KEY_PATH}.pub" ]; then
+    KEY_BODY="$(awk '{print $2}' "${KEY_PATH}.pub")"
+fi
+
 # ---------- 输入清单（漏斗第二层） ----------
 if [ "$PRECHECK" -eq 1 ] && [ -s "$PRECHECK_OK_FILE" ]; then
     mapfile -t ENTRIES < "$PRECHECK_OK_FILE"
@@ -39,41 +47,52 @@ push_entry() {
     parse_host "$entry"
     local ip="$HOST_IP" port="$HOST_PORT" user="$HOST_USER" pass="$HOST_SSH_PASS"
 
-    # 1) 目标机是否已有同标签公钥（同一轮重复执行时跳过）
-    local already
-    already=$(SSHPASS="$pass" timeout 15 sshpass -e ssh -p "$port" \
-        -o StrictHostKeyChecking=no \
-        -o ConnectTimeout=5 \
-        -o PreferredAuthentications=password \
-        -o PubkeyAuthentication=no \
-        "$user@$ip" "grep -c '$KEY_TAG' ~/.ssh/authorized_keys 2>/dev/null" 2>/dev/null || true)
+    # 1) 目标机是否已有「这一次这把公钥」（按公钥本体匹配，不按注释标签）
+    local already="0"
+    if [ -n "${KEY_BODY:-}" ]; then
+        already=$(SSHPASS="$pass" timeout 15 sshpass -e ssh -p "$port" \
+            -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=5 \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            "$user@$ip" "grep -cF -- '$KEY_BODY' ~/.ssh/authorized_keys 2>/dev/null" 2>/dev/null || true)
+    fi
 
     if [ "${already:-0}" -ge 1 ] 2>/dev/null; then
         echo "[SKIP-EXIST] $ip:$port" | tee -a "$LOG_FILE"
-        echo "$entry" >> "$PUSH_OK_FILE"
-        return 0
+    else
+        # 2) 下发公钥
+        local pubkey
+        pubkey=$(cat "${KEY_PATH}.pub")
+        if SSHPASS="$pass" timeout 15 sshpass -e ssh -p "$port" \
+            -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=5 \
+            -o PreferredAuthentications=password \
+            -o PubkeyAuthentication=no \
+            "$user@$ip" \
+            "mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '$pubkey' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+        then
+            echo "[OK] $ip:$port" | tee -a "$LOG_FILE"
+        else
+            echo "[FAIL-SSH] $ip:$port" | tee -a "$LOG_FILE"
+            echo "$entry" >> "$PUSH_FAIL_FILE"
+            return 0
+        fi
     fi
 
-    # 2) 下发公钥
-    local pubkey
-    pubkey=$(cat "${KEY_PATH}.pub")
-    if SSHPASS="$pass" timeout 15 sshpass -e ssh -p "$port" \
-        -o StrictHostKeyChecking=no \
-        -o ConnectTimeout=5 \
-        -o PreferredAuthentications=password \
-        -o PubkeyAuthentication=no \
-        "$user@$ip" \
-        "mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '$pubkey' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
-    then
-        echo "[OK] $ip:$port" | tee -a "$LOG_FILE"
+    # 3) 真实验证：用这把私钥做一次免密登录（P1-1）
+    #    「写进去了」不等于「能登录」：authorized_keys 权限/属主/SELinux 都可能让
+    #    公钥失效，只有真正连上一次才算下发成功，否则会拖到执行阶段变成 FAILED。
+    if ssh -i "$KEY_PATH" -p "$port" -o BatchMode=yes -o StrictHostKeyChecking=no \
+           -o ConnectTimeout=5 "$user@$ip" true 2>/dev/null; then
         echo "$entry" >> "$PUSH_OK_FILE"
     else
-        echo "[FAIL-SSH] $ip:$port" | tee -a "$LOG_FILE"
+        echo "[FAIL-VERIFY] $ip:$port 公钥已写入但免密登录失败（检查 ~/.ssh 权限、属主、SELinux）" | tee -a "$LOG_FILE"
         echo "$entry" >> "$PUSH_FAIL_FILE"
     fi
 }
 export -f push_entry parse_host
-export PUSH_OK_FILE PUSH_FAIL_FILE KEY_PATH KEY_TAG LOG_FILE
+export PUSH_OK_FILE PUSH_FAIL_FILE KEY_PATH KEY_TAG KEY_BODY LOG_FILE
 
 printf '%s\n' "${ENTRIES[@]}" | xargs -d '\n' -P "$PUSH_PARALLEL" -I{} bash -c 'push_entry "$@"' _ {}
 

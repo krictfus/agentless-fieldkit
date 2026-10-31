@@ -4,7 +4,9 @@
 #   不需要机房、不需要目标机；换环境、改完配置后先跑这个。
 #   覆盖：[1] 脚本语法  [2] 载荷契约  [3] 主机清单  [4] 结果分类（含三层漏斗）
 #         [5] 临时凭据权限  [6] 运行环境（podman/镜像/sshpass）
+#         [7] 清单解析规则（口令含 # / 行尾 CRLF）
 #   退出码：0 = 通过（可能带 WARN，需要你按提示处理）；1 = 有 NG
+#   ⚠ 不要在 run.sh 运行期间执行：本脚本会临时改写 conf/hosts/ 与 tmp/ 下的状态文件
 # ============================================================
 set -uo pipefail
 
@@ -18,7 +20,8 @@ warn() { printf '  [WARN] %s\n' "$1"; }
 # 自检会临时写 conf 与 tmp 状态文件，退出时清理
 TMPCONF="$HOSTS_DIR/zz-selftest.conf"
 cleanup_selftest() {
-    rm -f "$TMPCONF" "$PKG_ROOT/tmp/precheck.fail" "$PKG_ROOT/tmp/push.fail" \
+    rm -f "$TMPCONF" "$HOSTS_DIR/zz-selftest-parse.conf" \
+          "$PKG_ROOT/tmp/precheck.fail" "$PKG_ROOT/tmp/push.fail" \
           "$PKG_ROOT/tmp/precheck.ok" "$PKG_ROOT/tmp/push.ok" 2>/dev/null
 }
 trap cleanup_selftest EXIT INT TERM
@@ -68,30 +71,26 @@ fi
 # ------------------------------------------------------------
 echo
 echo "[4] 结果分类（正常 / 主机名 / 漏斗剔除 / MISSING）"
-if ( source "$PKG_ROOT/lib/host_var.sh" >/dev/null 2>&1 ); then
-    mkdir -p "$HOSTS_DIR" "$PKG_ROOT/tmp"
-    printf '10.0.0.5 root x x\nweb01.example.com root x x\n10.0.0.9 root x x\n127.0.0.3 root x x\n' > "$TMPCONF"
-    o="$(mktemp -d)"
-    printf 'PLAY RECAP ****\n10.0.0.5 : ok=4 changed=2 unreachable=0 failed=0 skipped=0 rescued=0 ignored=0\nweb01.example.com : ok=3 changed=1 unreachable=0 failed=2 skipped=0 rescued=0 ignored=0\n' > "$o/run.log"
-    # 人造输入（fixture）：10.0.0.9 进预检淘汰名单、127.0.0.3 进认证淘汰名单
-    printf '10.0.0.9:22\n' > "$PKG_ROOT/tmp/precheck.fail"
-    printf '127.0.0.3 root x x\n' > "$PKG_ROOT/tmp/push.fail"
-    bash "$PKG_ROOT/lib/summary.sh" "$o" >/dev/null 2>&1
-    sect() { awk -v c="$1:" '$0==c{f=1;next} /^$/{f=0} f' "$o/summary.txt"; }
-    sect OK          | grep -qx '10.0.0.5'          && ck OK "IPv4 条目分类为 OK" || ck NG "IPv4 条目分类异常"
-    sect FAILED      | grep -qx 'web01.example.com' && ck OK "主机名条目分类为 FAILED（原 P2-1）" || ck NG "主机名条目被静默丢弃（原 P2-1）"
-    sect UNREACHABLE | grep -qx '10.0.0.9'          && ck OK "预检剔除的主机归为 UNREACHABLE（漏斗第一层）" || ck NG "预检剔除分类异常"
-    sect AUTH_FAILED | grep -qx '127.0.0.3'         && ck OK "认证失败的主机归为 AUTH_FAILED（漏斗第二层）" || ck NG "认证失败分类异常"
-    # MISSING：清单里有、recap 里没有
-    printf '10.9.9.9 root x x\n' >> "$TMPCONF"
-    bash "$PKG_ROOT/lib/summary.sh" "$o" >/dev/null 2>&1
-    sect() { awk -v c="$1:" '$0==c{f=1;next} /^$/{f=0} f' "$o/summary.txt"; }
-    sect MISSING     | grep -qx '10.9.9.9'          && ck OK "未出现在 recap 的主机归为 MISSING" || ck NG "MISSING 分类缺失"
-    cleanup_selftest
-    rm -rf "$o"
-else
-    warn "跳过（尚未配置主机清单）"
-fi
+mkdir -p "$HOSTS_DIR" "$PKG_ROOT/tmp"
+printf '10.0.0.5 root x x\nweb01.example.com root x x\n10.0.0.9 root x x\n127.0.0.3 root x x\n' > "$TMPCONF"
+o="$(mktemp -d)"
+printf 'PLAY RECAP ****\n10.0.0.5 : ok=4 changed=2 unreachable=0 failed=0 skipped=0 rescued=0 ignored=0\nweb01.example.com : ok=3 changed=1 unreachable=0 failed=2 skipped=0 rescued=0 ignored=0\n' > "$o/run.log"
+# 人造输入（fixture）：10.0.0.9 进预检淘汰名单、127.0.0.3 进认证淘汰名单
+printf '10.0.0.9:22\n' > "$PKG_ROOT/tmp/precheck.fail"
+printf '127.0.0.3 root x x\n' > "$PKG_ROOT/tmp/push.fail"
+bash "$PKG_ROOT/lib/summary.sh" "$o" >/dev/null 2>&1
+sect() { awk -v c="$1:" '$0==c{f=1;next} /^$/{f=0} f' "$o/summary.txt"; }
+sect OK          | grep -qx '10.0.0.5'          && ck OK "IPv4 条目分类为 OK" || ck NG "IPv4 条目分类异常"
+sect FAILED      | grep -qx 'web01.example.com' && ck OK "主机名条目分类为 FAILED（原 P2-1）" || ck NG "主机名条目被静默丢弃（原 P2-1）"
+sect UNREACHABLE | grep -qx '10.0.0.9'          && ck OK "预检剔除的主机归为 UNREACHABLE（漏斗第一层）" || ck NG "预检剔除分类异常"
+sect AUTH_FAILED | grep -qx '127.0.0.3'         && ck OK "认证失败的主机归为 AUTH_FAILED（漏斗第二层）" || ck NG "认证失败分类异常"
+# MISSING：清单里有、recap 里没有
+printf '10.9.9.9 root x x\n' >> "$TMPCONF"
+bash "$PKG_ROOT/lib/summary.sh" "$o" >/dev/null 2>&1
+sect() { awk -v c="$1:" '$0==c{f=1;next} /^$/{f=0} f' "$o/summary.txt"; }
+sect MISSING     | grep -qx '10.9.9.9'          && ck OK "未出现在 recap 的主机归为 MISSING" || ck NG "MISSING 分类缺失"
+cleanup_selftest
+rm -rf "$o"
 
 # ------------------------------------------------------------
 echo
@@ -119,6 +118,30 @@ if command -v podman >/dev/null 2>&1; then
         warn "镜像未加载：podman load -i container/ansible-2.9.tar.gz"
     fi
 fi
+
+# ------------------------------------------------------------
+echo
+echo "[7] 清单解析规则（口令含 # / CRLF 行尾）"
+PARSE_CONF="$HOSTS_DIR/zz-selftest-parse.conf"
+# 第一行带 CRLF（模拟 Windows 记事本保存），口令里含 #；第二行是行尾注释
+printf '10.0.0.7 root p#ss#word sudo#pw\r\n10.0.0.8 root pw # 行尾注释\n' > "$PARSE_CONF"
+got1=$( source "$PKG_ROOT/lib/host_var.sh" >/dev/null 2>&1
+        for h in "${HOSTS[@]}"; do
+            parse_host "$h"
+            [ "$HOST_IP" = "10.0.0.7" ] && printf '%s|%s|%s\n' "$HOST_IP" "$HOST_SSH_PASS" "$HOST_SUDO_PASS"
+        done )
+got2=$( source "$PKG_ROOT/lib/host_var.sh" >/dev/null 2>&1
+        for h in "${HOSTS[@]}"; do
+            parse_host "$h"
+            [ "$HOST_IP" = "10.0.0.8" ] && printf '%s|%s\n' "$HOST_IP" "$HOST_SSH_PASS"
+        done )
+[ "$got1" = "10.0.0.7|p#ss#word|sudo#pw" ] \
+    && ck OK "口令中的 # 不被截断、行尾 \\r 已剥离（P0-2/P0-3）" \
+    || ck NG "清单解析异常：期望 10.0.0.7|p#ss#word|sudo#pw，实际 $got1"
+[ "$got2" = "10.0.0.8|pw" ] \
+    && ck OK "「空白 + #」仍按行尾注释剥离" \
+    || ck NG "行尾注释解析异常：期望 10.0.0.8|pw，实际 $got2"
+rm -f "$PARSE_CONF"
 
 # ------------------------------------------------------------
 echo

@@ -384,8 +384,11 @@ established trust).
 ## 9. Recent changes
 
 The full changelog lives in [`VERSION`](VERSION) and is kept in **Chinese** — this project's Chinese
-documentation is the authoritative version. Highlights of the current release (**3.4.0**): non-root support,
-the development and verification environment section, and the documented offline preparation workflow.
+documentation is the authoritative version. Highlights of the current release (**3.4.1**): a line-by-line
+review fixed six defects that failed *silently* — the artifact counter assumed a payload filename, the host-list
+parser truncated passwords at `#` and kept the Windows `\r`, key recycling failed when `authorized_keys` was
+absent and deleted by a shared tag (breaking concurrent runs), and "already pushed" was decided by comment tag
+instead of by the key itself. No features were added; see [`docs/REVIEW.md`](docs/REVIEW.md).
 ## 10. License, contributing, third-party
 
 - **License**: MIT — see [`LICENSE`](LICENSE).

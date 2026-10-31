@@ -5,7 +5,8 @@
 # ============================================================
 source "$(dirname "$0")/host_var.sh"
 
-TIMESTAMP="$(date +%Y%m%d%H%M%S)"
+# 带 PID 后缀（P3-1）：同一秒内并发两次运行会共用目录，产物互相覆盖
+TIMESTAMP="$(date +%Y%m%d%H%M%S)_$$"
 OUTPUT_DIR="$OUTPUT_ROOT/$TIMESTAMP"
 mkdir -p "$OUTPUT_DIR"
 echo "[*] 本次输出目录: $OUTPUT_DIR"
