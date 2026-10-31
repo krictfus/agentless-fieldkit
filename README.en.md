@@ -425,25 +425,14 @@ instead of by the key itself. No features were added; see [`docs/REVIEW.md`](doc
 
 ---
 
----
+## 11. About the author and this project
 
-## 11. About me / about this project
-
-- I was **25 years old** when I wrote this tool.
-- My study path is still **classic Linux operations** — I have not touched cloud computing yet.
-  I am working through the **RHCA track** and have already passed the certification.
-- The tool came out of **a machine-room task in September 2026** — it started as a spur-of-the-moment idea.
-- **The code and the text were written and organised with the help of AI**
-  (model: DeepSeek Harness, V41-Flash), but **the ideas and the architecture are mine**.
-- Because I want to convey my own thinking process, I tried to write the comments and the README in a
-  **detailed, plain-spoken** way.
-- My English is poor, so **all code comments are in Chinese**; `README.en.md` was produced by translation —
-  **corrections and improvements are very welcome**.
-- The purpose of this repository is **to exchange ideas and receive guidance, so that I can grow**.
-- **I have just started learning GitHub and I am not good at it yet** (I only know a handful of git
-  commands). So this is the first time I have properly put a project online: there may be only one or
-  two very large commits, no CI, and the issue templates were adapted from examples. If anything is
-  non-standard, please just tell me how to fix it.
+- Background: classic Linux operations (RHCA certified); currently focused on machine-room delivery and automation.
+- Origin: a machine-room batch task in September 2026, later abstracted into a reusable batch-execution framework.
+- Code and text were written and organised with the help of AI; the architecture, constraints and trade-offs
+  are the author's own, and his responsibility.
+- Comments and prose are in Chinese, and are written in a detailed, plain-spoken way so that whoever takes
+  over can see the reasoning; `README.en.md` is a translation — corrections are welcome.
 
 > On scope: **this is the by-product of one real task, not a mature product.**
 > Section 5 spells out what it fits and what it does not — if you already have a platform, credentials
