@@ -1,6 +1,19 @@
-3.6.0
+3.6.1
 
-# ========== 3.6.0（当前） ==========
+# ========== 3.6.1（当前） ==========
+# 纯文档版本（代码零改动，selftest 复跑 0 NG）。
+# [文档] DESIGN 双语拆分：docs/DESIGN.md 恢复为纯中文；新增 docs/DESIGN.en.md —— 完整对应版，
+#        覆盖 §一~§五 与 §3.1~3.12（此前内嵌的 English abstracts 只从 §3.8 开始，
+#        §一/§二/§3.1~3.7/§3.12/§四/§五 都没有英文；且 3.8 并非文档的自然起点）
+#        · DESIGN.md 顶部改为一行指针；删除内嵌英文段与"Design principles (in brief)"
+#        · CONTRIBUTING 增加"改 DESIGN 需同步 DESIGN.en.md；冲突时以中文为准"的维护约定
+# [文档] docs/REVIEW.md 移出仓库：历史评审记录不随版本发布（否则每个版本都要补一份评审过程，
+#        这没有意义）。仓库内 4 处引用同步清理：2 处代码注释改指 VERSION 3.4.1 条目、
+#        README/README.en 的目录树与 §9 链接改为纯文本说明；记录归档到作者私人文档
+# [文档] 修正 DESIGN §3.8 一处过时建议（"预装 sshpass 以跳过注入"——v3.6 起已无注入）
+#        文件数不变：33（+DESIGN.en.md −REVIEW.md）
+
+# ========== 3.6.0 ==========
 # 特性级：容器运行时不再写死 podman；删除容器内 sshpass 注入；依赖获取重写。
 # [新增] lib/runtime.sh —— 容器运行时适配器（podman / docker）
 #        · AGENTLESS_RUNTIME=auto|podman|docker（默认 auto，podman 优先）

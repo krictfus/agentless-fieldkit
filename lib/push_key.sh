@@ -24,7 +24,7 @@ chmod 600 "$KEY_PATH" "$KEY_PATH.pub"
 
 # 公钥本体（base64 那段，不含注释）——用于「按公钥精确识别」而不是按标签识别。
 # 为什么要它：`authorized_keys` 里可能有同标签但已过期的公钥，按标签判断会把
-# 「其实登不上」误判为「已下发」（P1-1，见 docs/REVIEW.md）。
+# 「其实登不上」误判为「已下发」（P1-1，v3.4.1 修复，见 VERSION 3.4.1 条目）。
 KEY_BODY=""
 if [ -f "${KEY_PATH}.pub" ]; then
     KEY_BODY="$(awk '{print $2}' "${KEY_PATH}.pub")"

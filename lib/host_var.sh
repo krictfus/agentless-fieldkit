@@ -52,7 +52,7 @@ PROJECT_DIR="$PKG_ROOT"
 #     # 注释     或     IP[:端口]  用户名  SSH密码  [sudo密码]
 # 模板文件名是 *.conf.template，不会被加载（防止示例 IP 被当成真实目标）。
 #
-# 三条解析规则（P0-2 / P0-3，详见 docs/REVIEW.md）：
+# 三条解析规则（P0-2 / P0-3，v3.4.1 修复，见 VERSION 3.4.1 条目）：
 #   1) 先剥行尾 CRLF——现场常用 Windows 记事本编辑，末字段会带 \r，
 #      不剥会让 sudo 密码变成 "xxx\r"，主机表现为 FAILED 而不是 AUTH_FAILED；
 #   2) 只有「行首」或「空白之后」的 # 才是注释——口令里允许出现 #（如 p#ss），

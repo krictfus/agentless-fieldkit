@@ -4,27 +4,8 @@
 > 使用方式与契约看 [`README.md`](../README.md)、[`payload/README.md`](../payload/README.md)，
 > 出问题看 [`故障排查.md`](故障排查.md)。
 > **代码注释只描述行为与契约**；设计理由集中在这里，避免注释里出现"作者视角"的说明。
-
----
-
-> **Language note**: the Chinese version of this file is authoritative; the block below is an English
-> rendering of the ten design principles, for readers who do not read Chinese. It is intentionally
-> short — the full rationale lives in the Chinese sections below.
-
-### Design principles (in brief)
-
-| # | Principle | One-line reason |
-|---|---|---|
-| 1 | **Payload / framework decoupling** | The script that does the work is provided by someone else and may be replaced; hard-coding the business into the framework means the framework dies together with that script |
-| 2 | **Minimal contract** | Three rules only (argument `$1`, exit code 0, non-empty artifact) — that is what makes "swap any script without touching the framework" possible |
-| 3 | **No pre-existing trust** | A site may have no usable credential at all (passwords are tried on site). Credentials come from a plain list file, keys are single-use and burned afterwards |
-| 4 | **Zero residue on targets is a hard constraint** | Including failure and interrupt paths: no script, no artifact, no public key left behind |
-| 5 | **Fail fast** | A host list always contains dead machines; one dead machine must not hold up the whole batch (three-layer funnel) |
-| 6 | **Zero-skill threshold** | The operator's floor is `cd` / `vim`: the interaction is reduced to "edit two text files + run one command" |
-| 7 | **Offline bootstrap** | The site often has no internet: no online installation, no external service required |
-| 8 | **Never parse payload artifacts** | The moment the framework tries to guess artifact formats it must either add compatibility code or impose new conventions on payload authors — which breaks principles 1 and 2 |
-| 9 | **No platform** | No web UI, no database, no long-running service: every extra service is another failure point, and mature tools already cover that ground (see README section 5) |
-| 10 | **Verifiable delivery** | Image digests are recorded and the offline self-test covers syntax / contract / host list / classification / permissions / environment — "looks right" is not evidence |
+>
+> 🌐 **English version:** [`DESIGN.en.md`](DESIGN.en.md) —— 完整对应版；**中文为权威版本**。
 
 ---
 ## 一、设计理念（十条原则）
@@ -148,8 +129,8 @@
 | 5 | 能配合 `network_mode: host`，并接受 compose 里那几处挂载（包目录同路径、`tmp/ansible-cp`、`/etc/hosts` 只读、`$HOME/.ssh` 只读） | 这些是"同路径挂载 + 套接字可写"的实现基础 |
 | 6 | 不需要自带 `ansible.cfg` | `run_playbook.sh` 显式 `export ANSIBLE_CONFIG` 指向本包内那份 |
 
-**想换镜像，最省事的顺序**：① 在镜像里**预装 sshpass**（这样第 4 条就不用注入了——`run.sh` 会先 `which sshpass`，
-有就跳过注入）；② 按 1~3、5~6 条自查一遍；③ 用 `bash selftest.sh` + 一次单台端到端验收。
+**想换镜像，最省事的顺序**：① 确认镜像**用密钥认证**（v3.6 起容器内不安装任何工具，已经没有"注入"要跳过了）；
+② 按 1~3、5~6 条自查一遍；③ 用 `bash selftest.sh` + 一次单台端到端验收。
 
 > 说明：上面这份契约是**从现有实现反推**出来的，我**没有验证过其它镜像**。
 >
@@ -316,81 +297,3 @@
 > （两者不在同一进程组）。本框架的承诺是**如实报告**——标记不完整、给出原因、以非零码退出——
 > 而**不是**"连带终止容器内进程"：后者需要 podman 级信号转发，会引入更多失败路径，违反"最小化变更"。
 > 两种中断行为已实测记录在 `docs/实战记录.md` 与本节表格中。
----
-
-## English abstracts (for readers who do not read Chinese)
-
-**§3.8 — the control-node image is pluggable.** The framework is decoupled from "the thing that does the
-work": the payload is replaceable, and so is the container image. The image shipped here is just my first
-implementation; any image satisfying the contract can replace it by changing the `image:` line in
-`ansible/podman-compose.yml`:
-
-1. contains **Ansible** (tested with 2.9.27 — verify the playbook against newer versions yourself);
-2. runs as **root with `HOME=/root`** (`ansible.cfg` uses `/root/.ssh/id_rsa_ansible`; the host `$HOME/.ssh`
-   is mounted there);
-3. has **`openssh-client`** with ControlMaster support and `bash`;
-4. is **Debian/Ubuntu-family** — `run.sh` currently injects sshpass with `dpkg -i`; pre-installing sshpass in
-   the image removes this requirement (the injection branch is skipped when `which sshpass` succeeds);
-5. works with `network_mode: host` and the existing mounts (package root at the same path, `tmp/ansible-cp`,
-   `/etc/hosts` read-only, `$HOME/.ssh` read-only);
-6. needs no `ansible.cfg` of its own (`run_playbook.sh` exports `ANSIBLE_CONFIG` to the one in this package).
-
-Easiest migration order: pre-install sshpass → re-check the other points → run `bash selftest.sh` plus one
-single-host end-to-end task. This contract was reverse-engineered from the current implementation; **I have
-not verified other images.**
-
-**§3.9 — multiple segments.** The field assumption is one cable, one segment, and a host list given by a
-human (no discovery, no asset database). Three shapes:
-
-- **A. one segment per run** (default) — fully supported: one `conf/hosts/<segment>.conf` per segment, run,
-  unplug, move on;
-- **B. a control node that can reach several segments** — already supported **without any code change**,
-  because every `*.conf` under `conf/hosts/` is loaded and merged into a single run, with the three-layer
-  funnel and the five result categories applied to all hosts at once;
-- **C. plugging into an upstream switch/router to reach several segments at once** — theoretically fine as
-  long as the control node itself has routes to them (that is just shape B), but **discovering segments and
-  establishing routes is not this tool's job** — that belongs to the network layer. The tool only promises:
-  "give me a list I can actually reach, and I will run it and classify the results."
-
-Deliberately **not** done: route discovery / segment scanning (authorisation boundary, see README section 7)
-and bastion hosts / ProxyJump (the host-list line format `IP[:port] user password [sudo_password]` has
-nowhere to put a jump parameter, and `ansible.cfg` sets no `ProxyCommand`; if you need a jump host, configure
-SSH jumping yourself, or use a platform with credential brokerage such as JumpServer).
-**§3.10 — why the host list is not encrypted.** SSH password authentication requires the client to hold the
-plaintext password, so encryption can only change *where* and *for how long* the plaintext exists — it cannot
-remove it; and encrypting on the same machine, with the key on that same machine, buys nothing. Making the
-stored list ciphertext means somebody has to remember a key, which is exactly what platform tools (AWX, Spug,
-JumpServer) exist to provide — and the field premise here is that none of that is available.
-
-The real exposures, and what can still be done:
-
-| Exposure | Can it be removed? |
-|---|---|
-| the operator's own `conf/hosts/*.conf` | ✅ keep it `chmod 600`, on an encrypted disk, delete it after the task, never commit it |
-| `tmp/hosts.ini` (contains the become password) | ⚠️ **the biggest single point**: Ansible 2.9 can only receive a become password non-interactively via inventory/vars, so it cannot be removed — only its lifetime can be shortened (600, deleted when the run ends) |
-| the process environment (`sshpass -e`) | never in `ps` argv; the same user or root can still read `/proc/<pid>/environ` — that is the OS boundary, not the tool's |
-| logs and artifacts | asserted (by `selftest.sh`) to contain no passwords |
-
-The strongest mitigation is already in place: **the execution phase runs entirely on public keys**, so a
-password is used only during key push and key recycling — seconds instead of the whole task.
-
-**No better answer yet — suggestions are welcome.** If you can reduce plaintext exposure *without* adding
-dependencies or asking the operator to type anything extra, please open an issue: this is probably the most
-worthwhile weak spot in this tool.
-
-**§3.11 — credentials are identified by the key itself, not by a comment tag (v3.4.1).** Key push and key
-recycling used to match on a fixed comment tag (`ansible_temp`). A tag is something a human types, not an
-identity, and it failed silently twice: a stale same-tag key on the target made the push stage report
-"already present" (the run then failed at execution and was classified `FAILED` instead of `AUTH_FAILED`),
-and two concurrent runs deleted each other's key. Matching now uses the public-key body (the base64 field)
-for both detection and removal, with `grep -vF` deleting exactly one line; the tag remains only as a
-human-readable comment. Recycling also checks that `authorized_keys` exists first — "no file" means
-"nothing to recycle", not "recycling failed" — and after a push the framework performs one real
-password-less login, because "the key was written" is not the same as "the key works". Residual note: when
-only the tag is left (manual re-run after the private key was deleted), recycling falls back to tag matching.
-
-**§3.11.1 — host-list parsing assumes nothing about the operator's editor or password.** A trailing `\r`
-is stripped first (Windows Notepad produces CRLF, and an un-stripped `\r` lands in the sudo password and
-surfaces as `FAILED`); only a `#` at the start of a line or after whitespace starts a comment (passwords
-such as `P@ss#2024` are common, and truncating at the first `#` made them fail as `AUTH_FAILED`); passwords
-may not contain spaces, which is part of the contract and is now documented.

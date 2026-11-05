@@ -49,7 +49,7 @@ is the environment it was developed and measured in:
   `fuse-overlayfs` and `slirp4netns` installed (present by default on RHEL 8.4).
 
 > Image ID / digest / sha256 are recorded in `container/IMAGE-PROVENANCE.md`; measurements
-> (single-host end-to-end, three-layer funnel 138 s → 21 s, etc.) are in `docs/DESIGN.md`, section 5.
+> (single-host end-to-end, three-layer funnel 138 s → 21 s, etc.) are in `docs/DESIGN.md`, section 5 (a full English counterpart: `docs/DESIGN.en.md`).
 
 > **The repository and the delivery package are not the same thing**: `container/ansible-2.9.tar.gz`,
 > real `conf/hosts/*.conf`, `payload/collect.sh`, `output/` and `tmp/` all belong to the **delivery package**
@@ -387,8 +387,8 @@ agentless-fieldkit/
 │   ├── playbook.yml
 │   └── podman-compose.yml
 ├── docs/
-│   ├── DESIGN.md              design philosophy and per-module rationale
-│   ├── REVIEW.md              code review and fix record (findings / root causes / verification)
+│   ├── DESIGN.md              design philosophy and per-module rationale (Chinese is authoritative)
+│   ├── DESIGN.en.md           full English counterpart of DESIGN.md
 │   ├── 实战记录.md            field-task template + lab measurements (Chinese)
 │   └── 故障排查.md             troubleshooting manual (Chinese)
 ├── output/                    per-run results (auto-created)
@@ -558,7 +558,7 @@ Highlights of **3.4.1**: a line-by-line
 review fixed six defects that failed *silently* — the artifact counter assumed a payload filename, the host-list
 parser truncated passwords at `#` and kept the Windows `\r`, key recycling failed when `authorized_keys` was
 absent and deleted by a shared tag (breaking concurrent runs), and "already pushed" was decided by comment tag
-instead of by the key itself. No features were added; see [`docs/REVIEW.md`](docs/REVIEW.md).
+instead of by the key itself. No features were added; see `docs/REVIEW.md` (the record was **moved out of the repository in v3.6.1**; see the `VERSION` 3.4.1 entry).
 ## 10. License, contributing, third-party
 
 - **License**: MIT — see [`LICENSE`](LICENSE).

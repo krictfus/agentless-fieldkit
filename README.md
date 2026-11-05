@@ -56,7 +56,7 @@ prepares the dependencies. MIT licensed.
 - **非 root 用户同样可用（已实测）**：rootless podman 下"容器内 root = 宿主当前用户"，
   产物归你本人所有，全程不需要 sudo。非 root 需要系统已安装 `fuse-overlayfs` 与 `slirp4netns`（RHEL 8.4 默认有）。
 
-> 镜像的 Image ID / digest / sha256 见 `container/IMAGE-PROVENANCE.md`；实测数据（单台端到端、三层漏斗 138 秒 → 21 秒等）见 `docs/DESIGN.md` 第五节。
+> 镜像的 Image ID / digest / sha256 见 `container/IMAGE-PROVENANCE.md`；实测数据（单台端到端、三层漏斗 138 秒 → 21 秒等）见 `docs/DESIGN.md`（英文完整版：`docs/DESIGN.en.md`） 第五节。
 
 ---
 ## 1. 它解决什么问题
@@ -356,8 +356,8 @@ agentless-fieldkit/
 │   ├── playbook.yml
 │   └── podman-compose.yml
 ├── docs/
-│   ├── DESIGN.md              设计理念与逐模块设计理由
-│   ├── REVIEW.md              代码评审与修复记录（问题/根因/验证）
+│   ├── DESIGN.md              设计理念与逐模块设计理由（中文权威）
+│   ├── DESIGN.en.md           同上，英文完整对应版
 │   ├── 实战记录.md            现场任务模板 + 实验室实测数据（含中断两路径）
 │   └── 故障排查.md            排障手册
 ├── output/                    每次运行的结果目录（自动创建）
@@ -523,7 +523,7 @@ run.sh
 - **v3.4.1**：代码评审修复 6 项"静默出错"的缺陷（**功能未变**）：产物计数不再写死载荷文件名、
   清单解析支持口令含 `#` 与 Windows CRLF、公钥回收改为按公钥本体精确删除且先判断文件存在、
   下发后增加一次真实免密登录验证、输出目录加 PID 防同秒碰撞。
-  新增 [`docs/REVIEW.md`](docs/REVIEW.md)（问题清单 / 根因 / 修复 / 验证 / 已知残留），
+  新增 `docs/REVIEW.md`（问题清单 / 根因 / 修复 / 验证 / 已知残留；**该记录已于 v3.6.1 移出仓库**，见 `VERSION` 3.4.1 条目），
   并在 `selftest.sh` 增加 [7] 清单解析规则断言。
 - **v3.4.2**：修复**中断语义**（外部评审 v2 实机发现）——执行阶段 Ctrl-C 不再被呈现为"成功完成"：
   `run_playbook.sh` 捕获 ansible 真实退出码（此前被 `|| true` 吞成 0）、`summary.sh` 在"无日志 /
