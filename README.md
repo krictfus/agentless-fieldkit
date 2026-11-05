@@ -91,8 +91,8 @@ cd agentless-fieldkit
 **没有 git**（或想要带版本号的快照）：
 
 ```bash
-wget https://github.com/krictfus/agentless-fieldkit/archive/refs/tags/v3.4.2.tar.gz
-tar xzf v3.4.2.tar.gz && cd agentless-fieldkit-3.4.2
+wget https://github.com/krictfus/agentless-fieldkit/archive/refs/tags/v3.4.3.tar.gz
+tar xzf v3.4.3.tar.gz && cd agentless-fieldkit-3.4.3
 ```
 
 ### 第 2 步：下载控制端镜像（139 MB，一次性）
@@ -519,6 +519,10 @@ run.sh
   同时：**重新发布** [`docs/实战记录.md`](docs/实战记录.md)（3.3.0 曾按"个人向"移除；本版改为
   "现场模板 + 实验室实测数据，无个人信息"）、对比表补 Fabric / Capistrano、
   明确"控制端镜像固定取自 v3.4.0"。
+- **v3.4.3**：文档与交付体验更新（**代码零改动**）——第 2 节重写为七步零基础流程
+  （补 git clone 命令、bootstrap 去重、自检减为一次、清单示例内联、结果查看命令 + 真实 summary 样例、
+  「网络打通」移至节末并改为新手友好写法）；新增 `container/ansible-2.9.tar.gz.sha256`
+  镜像校验清单（`sha256sum -c` 一条命令验货）；README.en.md 全面对齐；§5.2 对照表补 Fabric / Capistrano 列。
 
 ---
 

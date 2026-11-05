@@ -105,8 +105,8 @@ cd agentless-fieldkit
 **Without git** (or if you want a versioned snapshot):
 
 ```bash
-wget https://github.com/krictfus/agentless-fieldkit/archive/refs/tags/v3.4.2.tar.gz
-tar xzf v3.4.2.tar.gz && cd agentless-fieldkit-3.4.2
+wget https://github.com/krictfus/agentless-fieldkit/archive/refs/tags/v3.4.3.tar.gz
+tar xzf v3.4.3.tar.gz && cd agentless-fieldkit-3.4.3
 ```
 
 ### Step 2: Download the control-node image (139 MB, once)
