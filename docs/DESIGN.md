@@ -120,11 +120,16 @@
   仍然不依赖 podman-compose 的变量插值。rootless podman 下"容器 root = 宿主当前用户"，
   产物归当前用户所有，全程不需要 sudo。
 
-### 3.7 控制端容器：为什么"干净基础镜像 + 按需注入"
+### 3.7 控制端容器：干净基础镜像 + **运行期不做任何安装**（v3.6 改写）
 
-- 基础镜像只提供 Ansible；需要什么额外能力（例如 `sshpass`）就由 `run.sh` 从 `container/` 临时注入。
-- 好处：镜像可以长期冻结、行为稳定；交付包体积可控；加一个小工具不需要重建镜像。
-- 代价（使用者需知道）：注入包与镜像发行版绑定（本镜像基于 Ubuntu 20.04，所以用 `.deb`）；每次运行都会注入一次（幂等，多花几秒）。
+- 基础镜像只提供 Ansible；**运行期不再向容器内安装任何东西**。
+- 好处：镜像可以长期冻结、行为稳定；交付包体积可控；容器里没有"每次运行都装一遍"的步骤，失败路径更少。
+- **历史（v3.6 删除）**：v3.4.x 曾由 `run.sh` 把 `sshpass_1.09-1_amd64.deb` 注入容器。v3.6 的代码核对证明
+  **容器从未用到 sshpass**——容器内只用密钥认证（`ansible.cfg` 的 `private_key_file`），become 走 sudo 口令，
+  全仓不存在 `ansible_ssh_pass` / `ansible_password`。因此注入块、注入包，以及"镜像必须是 Debian 系"
+  这条约束一并删除。
+- 代价：将来若引入"密码直连"（让 Ansible 用口令登录目标机），镜像必须自带 `sshpass`——
+  该触发条件写进 §3.8 契约第 4 条。
 
 ### 3.8 控制端镜像：同样是"可替换"的（附契约）
 
@@ -139,7 +144,7 @@
 | 1 | 内含 **Ansible**（本包实测于 2.9.27；更高版本需自行验证 playbook 兼容性） | `run_playbook.sh` 在容器内调用它 |
 | 2 | **以 root 运行、且 `HOME=/root`** | `ansible.cfg` 用 `/root/.ssh/id_rsa_ansible`，宿主 `$HOME/.ssh` 被映射到容器 `/root/.ssh` |
 | 3 | 有 `openssh-client`（支持 ControlMaster 多路复用）与 `bash` | 连接目标机；`run.sh` 用 `podman exec -i ... bash` 操作容器 |
-| 4 | **Debian / Ubuntu 系**（或同时改掉注入方式） | ⚠️ 最容易踩的坑：`run.sh` 目前用 `dpkg -i sshpass_1.09-1_amd64.deb` 注入 sshpass。换 RHEL 系镜像必须改成 `.rpm`，或改用"镜像内预装" |
+| 4 | **必须走密钥认证**（当前实现即如此） | v3.6 起容器内不注入任何工具：容器只用 `private_key_file` 连目标机，become 走 sudo 口令。若将来引入"密码直连"（`ansible_ssh_pass`），镜像必须自带 `sshpass`——届时本契约同步修订 |
 | 5 | 能配合 `network_mode: host`，并接受 compose 里那几处挂载（包目录同路径、`tmp/ansible-cp`、`/etc/hosts` 只读、`$HOME/.ssh` 只读） | 这些是"同路径挂载 + 套接字可写"的实现基础 |
 | 6 | 不需要自带 `ansible.cfg` | `run_playbook.sh` 显式 `export ANSIBLE_CONFIG` 指向本包内那份 |
 
@@ -254,6 +259,29 @@
 这三条的共同点与 §3.2 一致：**错误要在正确的阶段、以正确的原因暴露**，而不是伪装成另一个阶段的问题。
 
 ---
+
+### 3.12 运行时也应是可替换的一层（v3.6 新增）
+
+**和"载荷可替换""镜像可替换"是同一个思路**：工具与"用哪个容器运行时"解耦。
+
+- 适配器在 `lib/runtime.sh`：`AGENTLESS_RUNTIME=auto|podman|docker`（默认 `auto`，**podman 优先**）。
+  六个原语（存在性 / 载入 / 容器内执行 / 容器列表 / compose 起 / compose 停）各一条确定路径。
+  **实现红线**：适配器内不许把「条件判断」与「回落」写在同一行——那会在"应当成功"的路径上
+  凭空多出一条失败分支（真出现过：链式写法会让 `podman load` 失败后偷偷再跑一次 `docker load`）。
+- 两条路的差异（使用者必须知道）：
+  | | podman 路径 | docker 路径 |
+  |---|---|---|
+  | 守护进程 | 无 | **有**（常驻） |
+  | 非 root | 原生 rootless，产物归当前用户 | 需加入 `docker` 组，**权限等价 root** |
+  | compose | `podman-compose`（pip 安装） | `docker compose`（单二进制，回退 `docker-compose` v1） |
+  | 来源 | RHEL 订阅内容（无订阅不可装） | docker-ce 公共源（**第三方源**） |
+- **与设计理念第 9 条的关系（显式例外）**：原则 9 是"不做平台、不引入常驻服务"。docker 路径的
+  daemon 确实是一个常驻服务，**本工具把它作为显式例外接受**，理由与约束一并写死：
+  1. 它是**使用者自选**的结果，不是工具自带的功能；`auto` 探测把 podman 排在前面，**默认不引入 daemon**；
+  2. 只在"有 docker、没有 podman"时才会走到；
+  3. 使用 docker 路径时要求：**仅本机使用**、**不要开启 remote API（2375/2376）**、不要把 socket 暴露给容器。
+- 边界：`AGENTLESS_RUNTIME=docker` 而机器上只有 podman 时，**明确报错，不静默回退**——静默回退会让人
+  以为用的是 docker，实际不是。
 
 ## 四、明确不做的事（以及为什么）
 

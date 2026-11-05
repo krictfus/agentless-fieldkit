@@ -1,6 +1,32 @@
-3.4.3
+3.6.0
 
-# ========== 3.4.3（当前） ==========
+# ========== 3.6.0（当前） ==========
+# 特性级：容器运行时不再写死 podman；删除容器内 sshpass 注入；依赖获取重写。
+# [新增] lib/runtime.sh —— 容器运行时适配器（podman / docker）
+#        · AGENTLESS_RUNTIME=auto|podman|docker（默认 auto，podman 优先）
+#        · 6 个原语：rt_exists / rt_load / rt_exec / rt_ps_names / rt_cmp_up / rt_cmp_down
+#        · 实现红线（评审 D-8）：适配器内禁止把「条件判断」与「回落」写在同一行——
+#          链式写法会在应当成功的路径上多出一条失败分支
+#        · docker compose 优先（v2 插件），缺失时回退 docker-compose（v1），写成显式 if
+# [删除] 容器内「按需注入 sshpass」（原 run.sh §4 + container/*.deb）
+#        代码核对证明容器从未用到它：容器只用密钥认证（ansible.cfg），become 走 sudo 口令，
+#        全仓无 ansible_ssh_pass/ansible_password。连带解除「镜像必须 Debian 系」的约束
+# [改进] bootstrap.sh 重写依赖获取
+#        · 删除 install_pkgs() 与引用不存在文件 container/sshpass_host.sh 的死分支
+#        · 运行时只检查不代装（来源涉及 RHEL 订阅 / docker-ce 第三方源，不由工具替用户选择）
+#        · sshpass：AppStream 直装（RHEL ≥ 8.2 无需 EPEL）→ AlmaLinux 单包 URL + GPG 回退 → 手动指令
+#        · compose 跟随探测到的运行时（podman-compose / docker compose）
+#        · 退出码统一：0 就绪 / 1 出错 / 2 环境缺失且已给出指令
+# [修复] run.sh：删除已过时的「RHEL/CentOS 需先启用 EPEL」提示（8.2+ 在 AppStream）；
+#        环境缺失类退出码统一为 2
+# [自检] selftest.sh：环境检查改为「当前运行时」；新增 [9] 三条回归断言
+#        （无裸 podman 调用 / run.sh 无 dpkg -i / 适配器内无符号混用分支）
+# [文档] DESIGN：§3.7 整节改写、§3.8 契约第 4 条改写、新增 §3.12「运行时也应是可替换的一层」
+#        （含设计理念第 9 条对 docker daemon 的显式例外声明）
+#        故障排查：删除「注入 sshpass 时 dpkg 报错」，新增「docker 路径起不来」「podman-compose 装不上（PEP 668）」
+#        README / README.en：第 3 步依赖、原理图、支持矩阵、第三方组件表、目录树
+
+# ========== 3.4.3 ==========
 # [文档] 文档与交付体验更新（代码零改动；selftest / 端到端均复测通过）：
 #        · README 第 2 节重写为七步零基础流程：补 git clone 命令；bootstrap 两次出现合并为一条主线；
 #          自检从两次减为一次；主机清单内联 5 个契约示例；修掉"密码首尾空格"歧义表述；

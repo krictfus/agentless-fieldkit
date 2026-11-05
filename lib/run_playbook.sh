@@ -4,8 +4,10 @@
 #   漏斗第三层：只对「公钥下发成功」的主机生成 inventory 并执行
 # ============================================================
 source "$(dirname "$0")/host_var.sh"
+# v3.6：运行时适配（父进程通过 AGENTLESS_RUNTIME 传下选择；单独执行时自行探测）
+source "$(dirname "$0")/runtime.sh"
 
-# pipefail（R-08）：让 `podman exec ... | tee` 的返回值取 ansible 的退出码，而不是 tee 的
+# pipefail（R-08）：让「容器内执行 → tee」这条管道的返回值取 ansible 的退出码，而不是 tee 的
 set -o pipefail
 
 # 带 PID 后缀（P3-1）：同一秒内并发两次运行会共用目录，产物互相覆盖
@@ -36,6 +38,11 @@ for entry in "${ENTRIES[@]}"; do
 done
 echo "[*] inventory 已生成: $INVENTORY_FILE（$(grep -c . "$INVENTORY_FILE" 2>/dev/null || echo 0) 台，权限 $(stat -c %a "$INVENTORY_FILE" 2>/dev/null)）"
 
+# v3.6：$RT 由父进程传下；若单独执行（手工重跑模式），在此自行探测
+if [ -z "${RT:-}" ]; then
+    detect_runtime --quiet || exit 1
+fi
+
 # ---------- 记录 playbook 退出码（给 summary.sh / run.sh 判断“是否跑完”） ----------
 PLAYBOOK_RC_FILE="$TMP_DIR/playbook.rc"
 echo 0 > "$PLAYBOOK_RC_FILE"
@@ -51,7 +58,7 @@ fi
 
 # ---------- 容器内执行 playbook ----------
 # ANSIBLE_CONFIG 显式指定，不依赖 cwd 自动发现 ansible.cfg
-podman exec -i "$CONTAINER_NAME" bash -c "
+rt_exec -i "$CONTAINER_NAME" bash -c "
     cd '$PKG_ROOT'
     export ANSIBLE_CONFIG='$ANSIBLE_DIR/ansible.cfg'
     ansible-playbook -i '$INVENTORY_FILE' -e 'output_dir=$OUTPUT_DIR' '$ANSIBLE_DIR/playbook.yml'

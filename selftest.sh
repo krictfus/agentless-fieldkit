@@ -6,6 +6,7 @@
 #         [5] 临时凭据权限  [6] 运行环境（podman/镜像/sshpass）
 #         [7] 清单解析规则（口令含 # / 行尾 CRLF）
 #         [8] 中断语义（结果不完整检测）
+#         [9] v3.6 回归（运行时抽象 / 删除注入 / 适配器规则）
 #   退出码：0 = 通过（可能带 WARN，需要你按提示处理）；1 = 有 NG
 #   ⚠ 不要在 run.sh 运行期间执行：本脚本会临时改写 conf/hosts/ 与 tmp/ 下的状态文件
 # ============================================================
@@ -109,17 +110,34 @@ fi
 
 # ------------------------------------------------------------
 echo
-echo "[6] 运行环境"
-command -v podman >/dev/null 2>&1 && ck OK "podman: $(podman --version 2>/dev/null)" || warn "未安装 podman（真正执行任务时才需要）"
-command -v podman-compose >/dev/null 2>&1 && ck OK "podman-compose 存在" || warn "未安装 podman-compose（真正执行任务时才需要）"
-command -v sshpass >/dev/null 2>&1 && ck OK "sshpass 存在" || warn "未安装 sshpass（下发/回收公钥需要）"
-if command -v podman >/dev/null 2>&1; then
-    if podman image exists krictfus/ansible:2.9 2>/dev/null; then
+echo "[6] 运行环境（v3.6：podman / docker 二选一）"
+source "$PKG_ROOT/lib/runtime.sh"
+if detect_runtime --quiet; then
+    ck OK "运行时: $RT ($("$RT" --version 2>/dev/null | head -1))"
+    case "$RT" in
+        podman)
+            command -v podman-compose >/dev/null 2>&1 && ck OK "podman-compose 存在" \
+                || warn "未安装 podman-compose（podman 路径需要，pip3 install podman-compose）"
+            ;;
+        docker)
+            if docker compose version >/dev/null 2>&1; then
+                ck OK "docker compose (v2) 存在"
+            elif command -v docker-compose >/dev/null 2>&1; then
+                ck OK "docker-compose (v1) 存在"
+            else
+                warn "未安装 docker compose / docker-compose（docker 路径需要）"
+            fi
+            ;;
+    esac
+    if rt_exists krictfus/ansible:2.9; then
         ck OK "镜像 krictfus/ansible:2.9 已加载"
     else
-        warn "镜像未加载：podman load -i container/ansible-2.9.tar.gz"
+        warn "镜像未加载：$RT load -i container/ansible-2.9.tar.gz"
     fi
+else
+    warn "未检测到 podman 或 docker（真正执行任务时才需要）"
 fi
+command -v sshpass >/dev/null 2>&1 && ck OK "sshpass 存在" || warn "未安装 sshpass（下发/回收公钥需要）"
 
 # ------------------------------------------------------------
 echo
@@ -193,6 +211,31 @@ sect8 OK | grep -qx '10.0.0.5' && ck OK "正常跑完时分类为 OK" || ck NG "
 rm -f "$PKG_ROOT/tmp/playbook.rc"
 cleanup_selftest
 rm -rf "$o8"
+
+# ------------------------------------------------------------
+echo
+echo "[9] v3.6 回归断言（运行时抽象 / 删除注入 / 适配器规则）"
+# ① 除 lib/runtime.sh 外不得出现裸的 podman 子命令调用
+_bare=$(grep -rnE '\bpodman (image|load|exec|ps|pull|run|save)\b' \
+        "$PKG_ROOT/run.sh" "$PKG_ROOT"/lib/*.sh 2>/dev/null | grep -v 'lib/runtime.sh' || true)
+if [ -z "$_bare" ]; then
+    ck OK "无裸 podman 调用（除 lib/runtime.sh）"
+else
+    ck NG "仍有裸 podman 调用：$_bare"
+fi
+# ② run.sh 不得再含「容器内注入」（dpkg -i）
+if grep -q 'dpkg -i' "$PKG_ROOT/run.sh" 2>/dev/null; then
+    ck NG "run.sh 仍含 dpkg -i（容器内注入应已删除）"
+else
+    ck OK "run.sh 无容器内注入（dpkg -i）"
+fi
+# ③ 适配器内不得出现「符号混用的分支行」（方案 D-8）
+_mixed=$(awk '/&&/ && /\|\|/' "$PKG_ROOT/lib/runtime.sh" 2>/dev/null || true)
+if [ -z "$_mixed" ]; then
+    ck OK "适配器内无符号混用分支（D-8）"
+else
+    ck NG "适配器含符号混用分支：$_mixed"
+fi
 
 # ------------------------------------------------------------
 echo

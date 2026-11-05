@@ -19,6 +19,8 @@ OUTPUT_ROOT="$PKG_ROOT/output"
 TMP_DIR="$PKG_ROOT/tmp"
 LOG_FILE="$PKG_ROOT/result.log"
 
+# v3.6：文件名保留 podman-compose.yml（改名会连锁改动文档与脚本），
+#       该 compose 文件对 podman-compose 与 docker compose 通用。
 COMPOSE_FILE="$ANSIBLE_DIR/podman-compose.yml"
 CONTAINER_NAME="ansible_workspace"
 IMAGE_REF="krictfus/ansible:2.9"

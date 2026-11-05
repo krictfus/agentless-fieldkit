@@ -6,7 +6,7 @@
 > 一条命令、改两个文件就能用；目标机零残留；**换一份载荷就能用于别的批量任务**。
 >
 > **定位**：给"没有任何平台可依赖的现场"用的**零技能门槛工具包**——
-> 不需要常驻服务器、不需要数据库、不需要预置凭据，有 `podman` 就能跑；
+> 不需要常驻服务器、不需要数据库、不需要预置凭据，有 `podman`（或 `docker`）就能跑；
 > 操作者只需要改两个文本文件、敲一条命令。
 >
 > **它不打算替代** Ansible / Spug / AWX / Semaphore / 蓝鲸 JOB / pdsh；
@@ -33,7 +33,7 @@ prepares the dependencies. MIT licensed.
 
 ## 0. 前言：开发与验证环境
 
-别人的环境只要满足"**有 podman 的 Linux + 能 SSH 到目标机**"就能跑。
+别人的环境只要满足"**有 podman 或 docker 的 Linux + 能 SSH 到目标机**"就能跑。
 非极端条件下的Linux控制节点应当都可以实现、自备该条件，如果需要构建该环境，我也准备了bootstrap.sh环境准备脚本，具体请查看第二节。
 下面是我开发和实测用的环境，供你对照：
 
@@ -52,7 +52,7 @@ prepares the dependencies. MIT licensed.
 
 **两条结论值得注意**：
 
-- **控制端不需要安装 Ansible**：Ansible 跑在容器里（版本钉死），宿主机只要有 **podman + podman-compose + sshpass**；
+- **控制端不需要安装 Ansible**：Ansible 跑在容器里（版本钉死），宿主机只要有 **容器运行时（podman 或 docker）+ compose + sshpass**；
 - **非 root 用户同样可用（已实测）**：rootless podman 下"容器内 root = 宿主当前用户"，
   产物归你本人所有，全程不需要 sudo。非 root 需要系统已安装 `fuse-overlayfs` 与 `slirp4netns`（RHEL 8.4 默认有）。
 
@@ -105,12 +105,12 @@ tar xzf v3.4.3.tar.gz && cd agentless-fieldkit-3.4.3
 wget -P container https://github.com/krictfus/agentless-fieldkit/releases/download/v3.4.0/ansible-2.9.tar.gz
 cd container
 sha256sum -c ansible-2.9.tar.gz.sha256
-podman load -i ansible-2.9.tar.gz
+podman load -i ansible-2.9.tar.gz        # 用 docker 时：docker load -i ansible-2.9.tar.gz
 cd ..
 ```
 
 - 第三行是**自动校验**：显示 `ansible-2.9.tar.gz: OK` = 文件完好；显示 `FAILED` = 下载损坏，删掉重下——**不用肉眼对哈希**；
-- `podman load` 看到 `Loaded image: krictfus/ansible:2.9` 即成功；
+- `podman load`（或 `docker load`）看到 `Loaded image: krictfus/ansible:2.9` 即成功；
 - 镜像内部信息与核验方法见 `container/IMAGE-PROVENANCE.md`。
 
 ### 第 3 步：装依赖（**整条流程唯一需要联网的一步**）
@@ -119,7 +119,18 @@ cd ..
 bash bootstrap.sh --install
 ```
 
-它会自动装好 `podman` / `podman-compose` / `sshpass` 三个依赖。
+它会装好 **`sshpass`**（宿主必需，下发/回收公钥要用）与 **compose**。
+
+**容器运行时（podman 或 docker）请先自行装好**——`bootstrap.sh` 只检查、并给出对应命令，不替你选择来源：
+
+| 环境 | 运行时 | 备注 |
+|---|---|---|
+| RHEL / CentOS / Rocky / Alma（**有订阅**） | `sudo dnf install -y podman` | podman 属订阅内容 |
+| RHEL（**无订阅**） | 走 docker：加 docker-ce 源后装 `docker-ce docker-compose-plugin` | 第三方源，自行评估 |
+| Ubuntu / Debian | `sudo apt-get install -y podman`（或 `docker.io`） | 两者都在 universe |
+
+> 两条路的差异（尤其**安全语义**）见 `docs/DESIGN.md` §3.12：docker 路径需在 `docker` 组，
+> **权限等价 root**，且多一个常驻 daemon。
 
 ### 第 4 步：自检一次（出门前）
 
@@ -323,6 +334,7 @@ agentless-fieldkit/
 │   ├── push_key.sh            三层漏斗第二层：并发下发公钥；认证失败的进 push.fail
 │   ├── cleanup_key.sh         公钥回收（凭据生命周期：回收，含失败保护）
 │   ├── run_playbook.sh        生成 inventory + 容器内执行 + 自动汇总
+│   ├── runtime.sh             容器运行时适配器（podman / docker，v3.6 新增）
 │   └── summary.sh             结果分类五类（含 AUTH_FAILED）+ 漏斗统计 + 诊断提示
 ├── payload/
 │   ├── README.md              载荷契约（换载荷必读）
@@ -333,10 +345,11 @@ agentless-fieldkit/
 │       ├── example.conf.template   模板（*.conf 才会被加载）
 │       └── *.conf                  真实清单：一个文件 = 一个网段/密码组
 ├── container/
-│   ├── ansible-2.9.tar.gz     控制端镜像（podman load 用；不入库，从 Release 附件下载）
+│   ├── ansible-2.9.tar.gz     控制端镜像（`<运行时> load` 用；不入库，从 Release 附件下载）
 │   ├── ansible-2.9.tar.gz.sha256  镜像校验清单（`sha256sum -c` 用，随仓库附带）
-│   ├── sshpass_1.09-1_amd64.deb    按需注入容器的软件包
 │   └── IMAGE-PROVENANCE.md    镜像来源与校验记录
+├── tools/pkgs/
+│   └── sshpass_1.09-1_amd64.deb  宿主（Debian 系）离线兜底；v3.6 起不再注入容器
 ├── ansible/
 │   ├── ansible.cfg
 │   ├── vars.yml
@@ -362,16 +375,16 @@ agentless-fieldkit/
 ```
 run.sh
  ├─ 载荷契约检查（非空 + 打印行数与 sha256）
- ├─ 前置检查（podman / 镜像 / sshpass / 配置齐全）
+ ├─ 前置检查（运行时 / 镜像 / sshpass / 配置齐全）
  ├─ lib/precheck.sh     ★漏斗第一层：TCP 快探（并行 64），剔除不可达主机
- ├─ podman-compose up   ← 干净的基础镜像 + 挂载包目录
- │    └─ 容器内按需注入 sshpass（保持基础镜像干净，镜像可长期冻结）
+ ├─ compose up（podman-compose 或 docker compose）← 干净的基础镜像 + 挂载包目录
+ │    └─ 容器内不做任何安装（v3.6 起）
  ├─ lib/push_key.sh     ★漏斗第二层：并发下发一次性公钥；认证失败的进 push.fail 并被排除
  ├─ lib/run_playbook.sh ★漏斗第三层：只对下发成功的主机生成 inventory → 容器内 ansible-playbook
  │    └─ playbook：清旧残留 → 推载荷 → 执行并校验契约 → 拉回产物 → 清本次文件
  ├─ lib/summary.sh      汇总五分类（OK/UNREACHABLE/AUTH_FAILED/FAILED/MISSING）+ 漏斗统计 + 诊断提示
  ├─ lib/cleanup_key.sh  只回收本次真的下发过公钥的主机；清不干净就保留私钥并告警
- └─ podman-compose down
+ └─ compose down
 ```
 
 五个关键设计：
@@ -390,7 +403,7 @@ run.sh
 
 5. **容器也是可替换的一层**：框架与"干活的东西"解耦——载荷可换，**控制端镜像同样可换**。
    本仓库给的镜像只是我做的第一个实现；任何满足契约（Ansible / root 且 `HOME=/root` / openssh /
-   Debian 系以便注入 sshpass / 配合现有挂载）的镜像都能替换它，改 `ansible/podman-compose.yml` 的 `image:` 一行即可。
+   v3.6 起不再要求 Debian 系——容器内不做任何安装）的镜像都能替换它，改 `ansible/podman-compose.yml` 的 `image:` 一行即可。
    契约与"最省事的替换顺序"见 `docs/DESIGN.md` 3.8。
 
 > **多网段**：`conf/hosts/` 下**所有 `*.conf` 都会被加载**并合并成一次任务，
@@ -462,8 +475,8 @@ run.sh
 
 | 项目 | 支持情况 |
 |---|---|
-| 控制端 | 任意能装 podman + podman-compose 的 Linux（RHEL 8+ / Ubuntu / 其他发行版） |
-| 控制端依赖 | `podman`、`podman-compose`、`sshpass`；不需要在控制机安装 Ansible |
+| 控制端 | 任意能装 **podman 或 docker**（二选一）+ compose 的 Linux（RHEL 8+ / Ubuntu / 其他发行版） |
+| 控制端依赖 | 容器运行时（`podman` 或 `docker`）、对应 compose、`sshpass`；不需要在控制机安装 Ansible。**docker 路径需在 `docker` 组，权限等价 root** |
 | 目标机认证 | root 直登，或普通用户 + sudo 提权（`ansible_become_pass`） |
 | 目标机端口 | 任意 SSH 端口（`IP:端口`），下发与回收都会用同一端口 |
 | 目标机依赖 | 需要 `bash` 与 Python ≥ 2.6（Ansible 模块要求）；低于此项需自行改用 `raw` 模块 |
@@ -524,6 +537,11 @@ run.sh
   「网络打通」移至节末并改为新手友好写法）；新增 `container/ansible-2.9.tar.gz.sha256`
   镜像校验清单（`sha256sum -c` 一条命令验货）；README.en.md 全面对齐；§5.2 对照表补 Fabric / Capistrano 列。
 
+- **v3.6.0**：**特性级**——容器运行时不再写死 podman（新增 `lib/runtime.sh`，`AGENTLESS_RUNTIME=auto|podman|docker`，
+  auto 优先 podman）；删除"容器内按需注入 sshpass"（代码核对证明从未用到，连带解除镜像的 Debian 系约束）；
+  `bootstrap.sh` 重写依赖获取（sshpass 取自 AppStream，无源时 AlmaLinux 单包 URL 回退；退出码统一 0/1/2，
+  docker 路径另可用）；`selftest.sh` 新增 `[9]` 三条回归断言。详见 `VERSION` 与 `docs/DESIGN.md` §3.7 / §3.12。
+
 ---
 
 ## 10. 许可、贡献与第三方组件
@@ -538,7 +556,7 @@ run.sh
 
 | 组件 | 来源 | 许可 | 说明 |
 |---|---|---|---|
-| `container/sshpass_1.09-1_amd64.deb` | Debian 项目（sshpass 1.09-1, amd64） | GPL-2.0-or-later | 仅为**离线/隔离网络**环境提供便利（有网时也可用发行版包管理器安装）。版权归原作者与 Debian 项目所有 |
+| `tools/pkgs/sshpass_1.09-1_amd64.deb` | Debian 项目（sshpass 1.09-1, amd64） | GPL-2.0-or-later | 仅作**宿主**（Debian/Ubuntu）在 `apt-get install sshpass` 失败时的离线兜底；v3.6 起不再注入容器。版权归原作者与 Debian 项目所有 |
 | 控制端镜像（**未随仓库分发**） | 自行构建：Ubuntu 20.04.6 + Ansible 2.9.27 | 镜像内 Ansible 为 GPLv3 | 仓库不含镜像 tar（见 `.gitignore`）。构建与校验方式见 `container/IMAGE-PROVENANCE.md` |
 
 - **一句说明**：第 5 节列出的那些同类方案（Puppet Bolt、pyinfra、pdsh/clush、

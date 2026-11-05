@@ -13,6 +13,8 @@ set -euo pipefail
 PKG_ROOT="$(cd "$(dirname "$0")" && pwd)"
 export PKG_ROOT                    # podman-compose.yml 用 ${PKG_ROOT} 做"同路径挂载"
 source "$PKG_ROOT/lib/host_var.sh"
+# v3.6：容器运行时适配器（podman / docker）
+source "$PKG_ROOT/lib/runtime.sh"
 
 # ---------- 命令行参数 ----------
 for arg in "$@"; do
@@ -53,7 +55,7 @@ cleanup_all() {
         bash "$PKG_ROOT/lib/cleanup_key.sh" 2>/dev/null || warn "公钥回收未全部成功，见 $LOG_FILE"
     fi
     rm -f "$TMP_DIR/hosts.ini"
-    podman-compose -f "$COMPOSE_EFFECTIVE" down >/dev/null 2>&1 || true
+    rt_cmp_down "$COMPOSE_EFFECTIVE" || true
     return $rc
 }
 trap cleanup_all EXIT INT TERM
@@ -79,26 +81,28 @@ ok "载荷就绪: $(wc -l < "$PAYLOAD_SCRIPT") 行  sha256=$(sha256sum "$PAYLOAD
 # ============================================================
 info "前置检查"
 
-if ! command -v podman >/dev/null 2>&1; then
-    err "podman 未安装或不在 PATH"
-    exit 1
+# v3.6：运行时探测（podman / docker 二选一；auto 优先 podman）
+if ! detect_runtime; then
+    err "请安装 podman 或 docker（二选一）后重试"
+    exit 2
 fi
-ok "podman 存在: $(podman --version 2>/dev/null)"
+# 把选择传给子脚本（lib/run_playbook.sh），避免二次探测结果不一致
+export AGENTLESS_RUNTIME="$RT"
 
-if ! podman image exists "$IMAGE_REF"; then
+if ! rt_exists "$IMAGE_REF"; then
     err "镜像 $IMAGE_REF 不存在"
-    err "请执行: podman load -i $CONTAINER_DIR/ansible-2.9.tar.gz"
-    exit 1
+    err "请执行: $RT load -i $CONTAINER_DIR/ansible-2.9.tar.gz"
+    exit 2
 fi
-ok "镜像 $IMAGE_REF 存在"
+ok "镜像 $IMAGE_REF 存在（运行时: $RT）"
 
 if ! command -v sshpass >/dev/null 2>&1; then
     err "宿主机缺少 sshpass（下发/回收公钥需要）"
-    if   command -v dnf    >/dev/null 2>&1; then err "安装: dnf install -y sshpass   # RHEL/CentOS 需先启用 EPEL"
+    if   command -v dnf    >/dev/null 2>&1; then err "安装: dnf install -y sshpass   # RHEL ≥ 8.2 在 AppStream，无需 EPEL"
     elif command -v apt    >/dev/null 2>&1; then err "安装: apt install -y sshpass"
     elif command -v zypper >/dev/null 2>&1; then err "安装: zypper install -y sshpass"
-    else err "请用你的发行版包管理器安装 sshpass"; fi
-    exit 1
+    else err "请用你的发行版包管理器安装 sshpass（无源时的单包 URL 见 bootstrap.sh 顶部常量）"; fi
+    exit 2
 fi
 ok "sshpass 存在"
 
@@ -126,10 +130,10 @@ echo ""
 # 3. 起容器
 # ============================================================
 info "启动容器"
-podman-compose -f "$COMPOSE_EFFECTIVE" up -d
+rt_cmp_up "$COMPOSE_EFFECTIVE"
 sleep 2
 
-if ! podman ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+if ! rt_ps_names | grep -q "^${CONTAINER_NAME}$"; then
     err "容器未启动成功"
     exit 1
 fi
@@ -137,26 +141,10 @@ ok "容器已启动"
 echo ""
 
 # ============================================================
-# 4. 按需注入 sshpass（保持基础镜像干净）
+# v3.6：容器内不再注入任何工具
+#   原「按需注入 sshpass」已删除——容器只用密钥认证（见 ansible/ansible.cfg），
+#   从未用到它。设计理由见 docs/DESIGN.md §3.7。
 # ============================================================
-info "检查容器内 sshpass"
-if ! podman exec -i "$CONTAINER_NAME" which sshpass >/dev/null 2>&1; then
-    info "基础镜像内没有 sshpass，从挂载目录按需注入"
-    INJECT_DEB="$CONTAINER_DIR/sshpass_1.09-1_amd64.deb"
-    if [ ! -f "$INJECT_DEB" ]; then
-        err "注入包不存在: $INJECT_DEB"
-        exit 1
-    fi
-    if ! podman exec -i "$CONTAINER_NAME" bash -c "dpkg -i '$INJECT_DEB'" >/dev/null; then
-        err "dpkg 安装 sshpass 失败（注入包与镜像发行版是否匹配？）"
-        exit 1
-    fi
-    if ! podman exec -i "$CONTAINER_NAME" which sshpass >/dev/null 2>&1; then
-        err "注入后仍找不到 sshpass"
-        exit 1
-    fi
-fi
-ok "容器内 sshpass 就绪"
 
 # ============================================================
 # 5. 三层漏斗 · 第二层：下发 SSH Key（同时剔除认证失败的主机）
@@ -228,7 +216,7 @@ echo ""
 # 9. 停容器
 # ============================================================
 info "停止容器"
-podman-compose -f "$COMPOSE_EFFECTIVE" down >/dev/null 2>&1 || true
+rt_cmp_down "$COMPOSE_EFFECTIVE" || true
 rm -f "$COMPOSE_EFFECTIVE"
 ok "容器已停止"
 echo ""

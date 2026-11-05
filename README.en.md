@@ -22,7 +22,7 @@
 
 ## 0. Environment (where this was built and verified)
 
-Any Linux box with **podman** that can SSH to the targets will run this — any control node short of
+Any Linux box with **podman or docker** that can SSH to the targets will run this — any control node short of
 unusual configurations should work, provided you supply those conditions yourself. If you need to build
 that environment, `bootstrap.sh` prepares the dependencies for you (see section 2). For reference, here
 is the environment it was developed and measured in:
@@ -43,7 +43,7 @@ is the environment it was developed and measured in:
 **Two things worth noting**:
 
 - **The control node does not need Ansible installed** — Ansible runs inside the container with a pinned
-  version, so the host only needs **podman + podman-compose + sshpass**.
+  version, so the host only needs **a container runtime (podman or docker) + compose + sshpass**.
 - **Non-root users work too (verified)** — under rootless podman, "root inside the container" maps to
   your own user, so artifacts are owned by you and no `sudo` is required anywhere. Non-root needs
   `fuse-overlayfs` and `slirp4netns` installed (present by default on RHEL 8.4).
@@ -120,13 +120,13 @@ version you run, the image always comes from the **v3.4.0** asset. A checksum fi
 wget -P container https://github.com/krictfus/agentless-fieldkit/releases/download/v3.4.0/ansible-2.9.tar.gz
 cd container
 sha256sum -c ansible-2.9.tar.gz.sha256
-podman load -i ansible-2.9.tar.gz
+podman load -i ansible-2.9.tar.gz        # with docker: docker load -i ansible-2.9.tar.gz
 cd ..
 ```
 
 - The third line verifies automatically: `ansible-2.9.tar.gz: OK` means intact; `FAILED` means the download
   is corrupt — delete it and download again. **No eyeballing hashes.**
-- `podman load` prints `Loaded image: krictfus/ansible:2.9` on success.
+- `podman load` (or `docker load`) prints `Loaded image: krictfus/ansible:2.9` on success.
 - Image contents and verification details: `container/IMAGE-PROVENANCE.md`.
 
 ### Step 3: Install dependencies (**the only step that needs internet**)
@@ -135,7 +135,20 @@ cd ..
 bash bootstrap.sh --install
 ```
 
-This installs `podman` / `podman-compose` / `sshpass` for you.
+This installs **`sshpass`** (required on the host for key push/recycle) and **compose**.
+
+**Install the container runtime (podman *or* docker) yourself first** — `bootstrap.sh` only checks it and prints
+the right command; it does not choose an installation source for you (RHEL subscription vs. the third-party
+docker-ce repo):
+
+| Environment | Runtime | Note |
+|---|---|---|
+| RHEL / CentOS / Rocky / Alma (**subscribed**) | `sudo dnf install -y podman` | podman is subscription content |
+| RHEL (**not subscribed**) | docker: add the docker-ce repo, then install `docker-ce docker-compose-plugin` | third-party repo — judge for yourself |
+| Ubuntu / Debian | `sudo apt-get install -y podman` (or `docker.io`) | both live in universe |
+
+> The security semantics differ — see `docs/DESIGN.md` §3.12: the docker path needs the `docker` group
+> (**equivalent to root**) and adds a resident daemon.
 
 ### Step 4: One self-test (before you leave)
 
@@ -352,6 +365,7 @@ agentless-fieldkit/
 │   ├── push_key.sh            funnel layer 2: parallel key push; auth failures go to push.fail
 │   ├── cleanup_key.sh         public-key recycling (credential lifecycle, with failure protection)
 │   ├── run_playbook.sh        inventory generation + in-container execution + automatic summary
+│   ├── runtime.sh             container-runtime adapter (podman / docker; added in v3.6)
 │   └── summary.sh             five result categories (incl. AUTH_FAILED) + funnel stats + hints
 ├── payload/
 │   ├── README.md              the payload contract (read this before swapping a payload)
@@ -362,10 +376,11 @@ agentless-fieldkit/
 │       ├── example.conf.template   template (only *.conf is loaded)
 │       └── *.conf                  real host lists: one file = one segment / password group
 ├── container/
-│   ├── ansible-2.9.tar.gz     control-node image for podman load (not committed; download from the Release asset)
+│   ├── ansible-2.9.tar.gz     control-node image for `<runtime> load` (not committed; download from the Release asset)
 │   ├── ansible-2.9.tar.gz.sha256  image checksum file (for `sha256sum -c`; ships with the repo)
-│   ├── sshpass_1.09-1_amd64.deb    package injected into the container on demand
 │   └── IMAGE-PROVENANCE.md    image provenance and verification record
+├── tools/pkgs/
+│   └── sshpass_1.09-1_amd64.deb  offline fallback for a Debian/Ubuntu **host**; no longer injected (v3.6)
 ├── ansible/
 │   ├── ansible.cfg
 │   ├── vars.yml
@@ -383,12 +398,12 @@ agentless-fieldkit/
 ## 4. How it works
 
 ```
-Control node (Linux + podman)
+Control node (Linux + podman or docker)
   run.sh
    1. payload contract check (non-empty + sha256 printed)
-   2. pre-flight checks (podman / image / sshpass / config files)
+   2. pre-flight checks (runtime / image / sshpass / config files)
    3. funnel layer 1 — lib/precheck.sh : parallel TCP probe (3s timeout, 64 workers)
-   4. start container (clean base image + sshpass injected on demand)
+   4. start container (clean base image; nothing is installed at runtime since v3.6)
    5. funnel layer 2 — lib/push_key.sh : parallel one-shot key push (16 workers)
    6. funnel layer 3 — lib/run_playbook.sh : inventory from the survivors only
    7. lib/summary.sh  : funnel statistics + five categories + filter reasons
@@ -415,7 +430,7 @@ Measured on a mixed scenario (2 reachable + 1 wrong password + 1 unreachable): *
 The framework is decoupled from "the thing that does the work": the payload is replaceable and so is the
 **control-node image**. The image shipped here is just *my* first implementation — any image that satisfies
 the contract (Ansible / runs as root with `HOME=/root` / openssh-client / Debian-family so sshpass can be
-injected / works with the existing mounts) can replace it; change the `image:` line in
+works with the existing mounts — and, since v3.6, no longer has to be Debian-family: nothing is installed at runtime) can replace it; change the `image:` line in
 `ansible/podman-compose.yml`. The contract and the easiest migration order are in `docs/DESIGN.md` 3.8.
 
 > **Multiple segments**: every `*.conf` under `conf/hosts/` is loaded and merged into a single run, so
@@ -493,7 +508,7 @@ established trust).
 
 | Item | Status |
 |---|---|
-| Control node | Linux with `podman` + `podman-compose` + `sshpass` (verified on RHEL 8.4 and Ubuntu 24.04) |
+| Control node | Linux with **podman or docker** (either one) + compose + `sshpass` (verified on RHEL 8.4 and Ubuntu 24.04). **The docker path needs the `docker` group — equivalent to root** |
 | Ansible version | pinned to **2.9.27** inside the container image |
 | Target hosts | Linux with SSH; Ansible modules need Python ≥ 2.6. Very old systems require the `raw` module path |
 | Windows targets | **Not supported** — WinRM/PowerShell is a different chain; such hosts are reported as unreachable |
@@ -533,6 +548,12 @@ used to leave a summary that looked complete. `run_playbook.sh` now keeps Ansibl
 the success banner, and `selftest.sh` gained group [8]. Also: `docs/实战记录.md` is published, and the
 comparison table gained Fabric / Capistrano.
 
+**3.6.0 — the runtime is no longer hard-coded.** `lib/runtime.sh` adds `AGENTLESS_RUNTIME=auto|podman|docker`
+(auto prefers podman). The on-demand sshpass injection into the container is gone — the container only ever used
+key auth, so the Debian-family requirement is lifted too. `bootstrap.sh` was rewritten (sshpass from AppStream,
+single-rpm fallback, exit codes 0/1/2) and `selftest.sh` gained group [9] with three regression assertions.
+Design notes: `docs/DESIGN.md` §3.7 and §3.12.
+
 Highlights of **3.4.1**: a line-by-line
 review fixed six defects that failed *silently* — the artifact counter assumed a payload filename, the host-list
 parser truncated passwords at `#` and kept the Windows `\r`, key recycling failed when `authorized_keys` was
@@ -549,7 +570,7 @@ instead of by the key itself. No features were added; see [`docs/REVIEW.md`](doc
 
 | Component | Source | License | Notes |
 |---|---|---|---|
-| `container/sshpass_1.09-1_amd64.deb` | Debian project (sshpass 1.09-1, amd64) | GPL-2.0-or-later | Convenience for **offline / isolated** environments; you can also install it from your distribution when you have network access |
+| `tools/pkgs/sshpass_1.09-1_amd64.deb` | Debian project (sshpass 1.09-1, amd64) | GPL-2.0-or-later | Offline fallback for a **Debian/Ubuntu host** when `apt-get install sshpass` fails; since v3.6 it is no longer injected into the container |
 | Control-node image (**not shipped** in this repository) | Built by the user: Ubuntu 20.04.6 + Ansible 2.9.27 | Ansible inside is GPLv3 | The image tarball is excluded via `.gitignore`; see `container/IMAGE-PROVENANCE.md` |
 
 - **A clarification (more accurate than "credits")**: every similar project listed in section 5
