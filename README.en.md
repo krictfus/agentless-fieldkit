@@ -56,79 +56,6 @@ is the environment it was developed and measured in:
 > (what you carry to the site) and are **not committed** (see `.gitignore`). The repository only holds
 > publicly shareable code and docs; the 139 MB image tarball travels with the package or as a Release asset.
 
-### Network connectivity: when the control node runs inside a VMware VM (important)
-
-> Only **VMware** is covered here (that is all the author has used). If your control node is a physical Linux
-> box that can already reach the target segment, skip this section. The single goal: **the control node inside
-> the VM must be able to reach port 22 of the machines on the target segment.**
-
-**Why this needs its own section.** Everything this tool does is an **outbound SSH connection** from the
-control node — it never listens on any port and nobody connects to it — so it works as long as the control
-node can *see* the target segment. When the control node is a VM, that is exactly the step people get stuck
-on: bridged to the wrong adapter, wrong subnet, or an adapter that is simply not "connected".
-
-#### 1. Windows + VMware Workstation (the author's measured setup)
-
-1. **Start VMware Workstation as administrator every time** — otherwise changes in the Virtual Network
-   Editor silently fail to take effect because of permissions.
-2. **Edit → Virtual Network Editor** → create a dedicated `VMnet` (e.g. VMnet2), set it to **Bridged**, and
-   explicitly **bridge it to the wired NIC** that has the cable in it.
-   ⚠️ **Do not leave it on "Automatic"**: when the host has both Wi-Fi and Ethernet, automatic bridging can
-   pick Wi-Fi — the symptom is "the VM has internet, but cannot ping anything in the machine room".
-   (Note: in bridged mode the `VMware Network Adapter VMnetN` adapters in Windows are **not** involved —
-   what must be enabled and connected is the **physical wired NIC**; you do not set an IP on the VMnet adapter.)
-3. **VM settings → Network Adapter**: choose **Bridged**, select that VMnet, and tick **both**
-   "Connected" and "Connect at power on" — the most commonly missed step.
-4. **Give the VM an address in the same subnet**:
-   - machine-room segments usually have **no DHCP** → configure a **static IP** (same subnet, same prefix;
-     a gateway is normally unnecessary because the segment has no exit);
-   - if there is DHCP → `dhclient`, or `nmcli con up <name>`;
-   - ⚠️ **check that the address is free before you pick it** (`ping -c1 <candidate>`, or ask on site),
-     otherwise you create an IP conflict;
-   - moving to another segment means changing the static IP; on DHCP use `dhclient -r && dhclient`.
-5. **Verify reachability with the framework's own probe**:
-
-```bash
-ip -4 addr show                                          # the address must belong to the target segment
-ip route
-timeout 3 bash -c 'exec 3<>/dev/tcp/10.0.0.5/22' && echo "port 22 reachable" || echo "not reachable"
-```
-
-   The last command is exactly what funnel layer 1 (`lib/precheck.sh`) does — if it succeeds, `run.sh` almost
-   certainly will too.
-
-#### 2. Should you disable the firewall and SELinux? No — and it is not recommended
-
-- The tool only makes **outbound SSH connections** and the control node **listens on no port**, so there is
-  nothing to open or close in the firewall for it;
-- In the author's measured environment `firewalld` was inactive and SELinux was **Disabled**, so behaviour
-  with them **enabled has not been verified**. If you hit a problem with `firewalld` running or SELinux in
-  `Enforcing` mode, check these first:
-
-```bash
-systemctl status firewalld              # is the firewall blocking something
-getenforce                              # is SELinux Enforcing
-dmesg | grep -i denied | tail           # or: ausearch -m avc -ts recent
-```
-
-  The most likely spot is the container bind mount of `$HOME/.ssh` (SELinux type `ssh_home_t`). If that is the
-  problem, fix it with `:z` / `:Z` or a relabel — **not** by turning SELinux off. Please open an issue if you
-  hit it; the conclusion will be added to `docs/DESIGN.md`.
-
-#### 3. Other common traps
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| VM has internet but cannot reach machine-room devices | bridged to Wi-Fi / wrong bridge target | redo step 2 and bridge to the wired NIC |
-| no adapter, or it shows "not connected" | "Connected" not ticked in VM settings | tick "Connected" and "Connect at power on" |
-| changing bridge settings has no effect | VMware not started as administrator | restart elevated and change it again |
-| breaks after moving to another segment | still the old static IP / DHCP lease not renewed | change the static IP, or `dhclient -r && dhclient` |
-| odd behaviour while a VPN is up on the host | the VPN takes over routing, so bridging is no longer a direct link | disconnect the VPN temporarily, or use another control machine |
-| ping works but port 22 does not | sshd not running / firewall on the target | that is the target side; the framework reports `UNREACHABLE` |
-
-> The author's host split: **Wi-Fi for internet, the wired NIC dedicated to the machine-room segment** — the
-> two do not interfere.
-
 ---
 ## 1. What problem does it solve?
 
@@ -155,65 +82,164 @@ credential recycling — is handled by the framework.
 - one artifact file per host (default `*_report.html`);
 - `run.log` — the full Ansible run.
 
-## 2. Quick start (30 seconds)
+## 2. From zero to running (full walkthrough — just follow along)
 
-> Running the control node inside a **VMware VM**? **Read the "Network connectivity" subsection at the end of this section first** — nothing works until that does.
+> This section assumes almost **zero background**: no Ansible, no podman, maybe not even VMware — that is fine.
+> Every step gives you the command, **what success looks like**, and where to look if it fails. The only skills
+> you need are `cd` and `vi`.
+> The rhythm in one sentence: **do steps 1–4 where you have internet → unplug, carry it to the site, and do
+> only steps 5–7 (fully offline)**.
+> Control node is a VMware VM? Before the first run, check
+> [Network connectivity](#network-connectivity-when-the-control-node-is-a-vmware-vm-skip-on-a-physical-machine)
+> at the end of this section.
 
-**Getting the package**: with git, just clone it; without git (or if you want a versioned snapshot), use the tag archive:
+### Step 1: Get the package (choose one)
+
+**With git** (recommended; `git pull` updates later):
 
 ```bash
-wget https://github.com/krictfus/agentless-fieldkit/archive/refs/tags/v3.4.1.tar.gz
-tar xzf v3.4.1.tar.gz && cd agentless-fieldkit-3.4.1
+git clone https://github.com/krictfus/agentless-fieldkit.git
+cd agentless-fieldkit
 ```
 
-The image is **not** in the source archive (excluded by `.gitignore`). The image is decoupled from the code
-version: it is always taken from the **v3.4.0** asset (later releases do not re-upload the same file):
+**Without git** (or if you want a versioned snapshot):
 
 ```bash
-wget https://github.com/krictfus/agentless-fieldkit/releases/download/v3.4.0/ansible-2.9.tar.gz
-sha256sum ansible-2.9.tar.gz   # expect ed5eb9e40f837cdc5df7f3376acf81bc11af26807776e672d040a1a8e160c395
+wget https://github.com/krictfus/agentless-fieldkit/archive/refs/tags/v3.4.2.tar.gz
+tar xzf v3.4.2.tar.gz && cd agentless-fieldkit-3.4.2
+```
+
+### Step 2: Download the control-node image (139 MB, once)
+
+The tool works through "Ansible with a pinned version inside a container"; the image is too big for the
+source archive, so download it separately. **The image is decoupled from the code version**: whatever code
+version you run, the image always comes from the **v3.4.0** asset. A checksum file
+`ansible-2.9.tar.gz.sha256` **ships with the repository** (under `container/`) — let it verify the download:
+
+```bash
+wget -P container https://github.com/krictfus/agentless-fieldkit/releases/download/v3.4.0/ansible-2.9.tar.gz
+cd container
+sha256sum -c ansible-2.9.tar.gz.sha256
 podman load -i ansible-2.9.tar.gz
+cd ..
 ```
 
-### 0. Prepare before you go (do this once, **where you have network access**)
+- The third line verifies automatically: `ansible-2.9.tar.gz: OK` means intact; `FAILED` means the download
+  is corrupt — delete it and download again. **No eyeballing hashes.**
+- `podman load` prints `Loaded image: krictfus/ansible:2.9` on success.
+- Image contents and verification details: `container/IMAGE-PROVENANCE.md`.
 
-The site is usually **offline**, so the flow is "**prepare online, then unplug and carry it there**":
+### Step 3: Install dependencies (**the only step that needs internet**)
 
 ```bash
-bash bootstrap.sh --install                    # 1) install dependencies (podman / podman-compose / sshpass) — needs network
-podman load -i container/ansible-2.9.tar.gz    # 2) load the control-node image (the 139 MB tarball travels with the package)
-bash selftest.sh                               # 3) if this passes, the package is ready for the site
+bash bootstrap.sh --install
 ```
 
-**Once you are on site**: just run `bash bootstrap.sh` (**without `--install`**) and `bash selftest.sh`;
-nothing in that path needs network. Step 1 above is the only step that ever needs it.
+This installs `podman` / `podman-compose` / `sshpass` for you.
+
+### Step 4: One self-test (before you leave)
 
 ```bash
-# 1) Prepare the control node (once, or whenever you move to a new machine; --install needs network)
-bash bootstrap.sh            # add --install to let it install podman/podman-compose/sshpass
+bash selftest.sh
+```
 
-# 2) Fill in the host list (plain data lines — no shell syntax needed)
+All `OK` with exit code `0` = ready to go. Any `NG` → check `docs/故障排查.md` first; do not carry a broken
+setup. **Once is enough**: if you arrive on site with the same machine and the same directory, go straight
+to step 5. Only re-run `bash bootstrap.sh` (**without** `--install` — check only, installs nothing) and
+`bash selftest.sh` if you switched machines or feel unsure.
+
+### Step 5: Fill in the host list (the only step that needs thought)
+
+```bash
 cp conf/hosts/example.conf.template conf/hosts/seg10.conf
-vi conf/hosts/seg10.conf     # one host per line: IP[:port] user password [sudo_password]
-                              #   (the expected format is shown in example.conf.template)
+vi conf/hosts/seg10.conf
+```
 
-# 3) Drop in the payload (the script provided by the business side)
+One host per line: `IP[:port] user password [sudo_password]` — copy the shape of these examples:
+
+```
+10.0.0.11 root Admin@123                # direct root login, the most common form
+10.0.0.12 root Admin@123
+10.0.0.13:2222 root Admin@123           # SSH not on 22: append :port to the IP
+10.0.0.14 ops P@ssw0rd Sudo@456         # normal user + sudo (4th field is the sudo password)
+10.0.0.15 root Ab#cd123                 # passwords may contain #
+```
+
+Three rules (getting them wrong raises no error — the host just "fails authentication for no visible reason"):
+
+- Fields are split on whitespace (IP, user, password), so **a password must not contain spaces**, but **may contain `#`**;
+- write a trailing comment as **space + `#`** (as in the examples); a `#` glued to the password becomes part of the password;
+- stop typing at the end of the line — **no trailing spaces or tabs** (invisible, but they can break parsing).
+
+Any editor works: **Windows Notepad produces exactly the right format**; writing with `vi` on Linux is
+identical (Notepad's CRLF line endings are handled automatically — do not worry about them).
+
+Hosts in one segment sharing one password go in one `.conf`; different segments / passwords go in separate
+files — **every `*.conf` under `conf/hosts/` is loaded** and merged into a single run.
+
+### Step 6: Drop in the payload (the script the business side gave you)
+
+```bash
 cp /path/to/company-script.sh payload/collect.sh
+```
 
-# 4) Run
+The "payload" is the script that actually does the work on every target — whoever gave you the task provides
+the script; the framework only delivers it, runs it, and brings the results back.
+
+### Step 7: Run
+
+> Control node in a **VMware VM**, first time running? Jump to
+> [Network connectivity](#network-connectivity-when-the-control-node-is-a-vmware-vm-skip-on-a-physical-machine)
+> at the end of this section and confirm reachability first — with no connectivity, every host just comes
+> back `UNREACHABLE`.
+
+```bash
 bash run.sh
 ```
 
-Three rules for the host list — getting them wrong raises no error, it only makes hosts fail
-authentication for no visible reason:
+Results land in `output/<timestamp>/` — these three commands show you around:
 
-- **A password may contain `#`**, but **must not contain spaces** (fields are whitespace-separated);
-- Write a trailing comment as **whitespace + `#`** (e.g. `10.0.0.5 root pw # note`); a `#` glued to
-  the password is part of the password;
-- The file can be edited with Windows Notepad (CRLF is handled); just do not pad the password with spaces.
+```bash
+ls -lt output/                       # the top entry is the result directory from this run (named by timestamp)
+cat output/<timestamp>/summary.txt   # summary: five categories + why each host was filtered (replace <timestamp>)
+ls output/<timestamp>/               # one artifact per host (default *_report.html) plus the full run.log
+```
 
-**Want to test the whole chain without a real payload?** Use the example payload against a machine
-you can SSH into:
+The summary itself is printed in Chinese; a real one looks like this (3 hosts: one fine, one wrong
+password, one unreachable):
+
+```text
+=== 三层漏斗统计 ===        <- funnel statistics: total / dropped by probe / dropped by auth / executed
+清单总数            : 3
+第一层 预检剔除(不可达): 1
+第二层 认证剔除(下发失败): 1
+第三层 实际进入执行      : 1
+
+=== 分类结果 ===           <- five categories
+OK:
+127.0.0.1
+
+UNREACHABLE:
+10.255.255.1
+
+AUTH_FAILED:
+127.0.0.2
+
+FAILED:
+(无)                        <- (none)
+
+MISSING:
+(无)
+
+=== 被剔除主机的原因 ===     <- why each filtered host was dropped
+127.0.0.2 : 公钥下发失败：用户名/口令错误或无权限（执行阶段已跳过）   <- key push failed: bad user/password (skipped)
+10.255.255.1 : SSH 端口不可达（预检阶段剔除，未进入下发/执行）         <- SSH port unreachable (dropped by the probe)
+```
+
+- Read `summary.txt` first: only `OK` hosts actually produced data; every filtered host has its reason at the bottom;
+- seeing "⚠ incomplete results" means the run was interrupted or failed — follow the notice at the top; **do not hand it in as a completed result**.
+
+**Want a dry run without touching real machines?** Use the example payload against a machine you can SSH into:
 
 ```bash
 cp payload/collect.example.sh payload/collect.sh
@@ -221,11 +247,90 @@ printf '127.0.0.1 root yourpassword yourpassword\n' > conf/hosts/lo.conf
 bash run.sh
 ```
 
-**Boundary note**: the framework only emits `summary.txt` (funnel statistics + five categories +
+**Boundary note (important)**: the framework only emits `summary.txt` (funnel statistics + five categories +
 per-host filter reasons). It deliberately does **not** build "content-level summaries" that parse
 artifact contents — doing so would require format compatibility or new conventions imposed on payload
 authors, which would break the "swap any script without touching the tool" promise. Open the artifact
 files themselves; if you need machine-readable data, that is the payload author's job.
+
+---
+
+### Network connectivity: when the control node is a VMware VM (skip on a physical machine)
+
+> Only **VMware** is covered here (that is all the author has used). If your control node is a physical Linux
+> box that already reaches the target segment, skip this. Unsure? Run the three reachability-check commands
+> below and you will know.
+
+**One thing to understand first (beginner version)**: everything this tool does is an **outbound SSH
+connection from the control node to port 22 of the targets** — it never listens on any port, and nobody
+connects back. So the only requirement is: **the control node itself can reach the target segment**. A
+physical machine just needs the cable; **a VM has one extra layer** — its network is virtualised by VMware,
+and the classic symptom of a misconfiguration is "the VM has internet, but cannot reach anything in the
+machine room". This section fixes exactly that.
+
+**Windows + VMware Workstation (the author's measured setup, step by step)**:
+
+1. **Start VMware Workstation as administrator every time.**
+   Otherwise the bridge changes below appear to succeed but silently do nothing — the sneakiest trap of all.
+2. **Edit → Virtual Network Editor** → create a dedicated `VMnet` (e.g. VMnet2), set it to **Bridged**, and
+   explicitly **bridge it to the wired NIC** that has the cable in it.
+   ⚠️ **Do not leave it on "Automatic"**: when the host has both Wi-Fi and Ethernet, automatic bridging can
+   pick Wi-Fi — the symptom is "the VM has internet, but cannot ping anything in the machine room".
+   (Side note: in bridged mode the `VMware Network Adapter VMnetN` adapters in Windows are **not** involved —
+   what must be enabled and connected is the **physical wired NIC**; you do not set an IP on the VMnet adapter.)
+3. Right-click the VM → **Settings → Network Adapter**: choose **Bridged** (or the VMnet you just made), and
+   tick **both** "Connected" and "Connect at power on" — **the most commonly missed step**.
+4. **Give the Linux inside the VM an address in the same subnet as the targets**:
+   - "same subnet" means: if the targets are `10.0.0.x` with prefix `255.255.255.0`, give the VM a free
+     address that also starts with `10.0.0.`;
+   - machine-room segments usually have **no DHCP** (nothing hands out addresses automatically) → configure a
+     **static IP** with the same prefix; a gateway is normally unnecessary (an isolated segment has no exit);
+   - if there is DHCP → run `dhclient` to get an address automatically;
+   - ⚠️ **check the address is free before you take it**: `ping -c1 <candidate>` (**no reply is good news**),
+     or just ask on site — otherwise you create an IP conflict;
+   - moving to another segment means changing the static IP; on DHCP renew with `dhclient -r && dhclient`.
+5. **Verify reachability (three commands)**:
+
+```bash
+ip -4 addr show      # you should see the address you just configured, in the target segment
+ip route             # you should see a direct route for the target segment
+timeout 3 bash -c 'exec 3<>/dev/tcp/10.0.0.5/22' && echo "port 22 reachable" || echo "not reachable"
+```
+
+   Replace `10.0.0.5` with the real IP of any target. **"port 22 reachable" means you are done here** —
+   this is exactly the probe used by funnel layer 1 (`lib/precheck.sh`); if it succeeds, `run.sh` almost
+   certainly will too.
+
+**Should you disable the firewall and SELinux? No — and it is not recommended.**
+
+- The tool only makes **outbound** SSH connections and **listens on no port**, so the firewall needs no
+  change for it;
+- in the author's measured environment `firewalld` was inactive and SELinux was **Disabled**, so behaviour
+  with them **enabled has not been verified**. If you hit a problem, check these first:
+
+```bash
+systemctl status firewalld              # is the firewall blocking something
+getenforce                              # is SELinux Enforcing
+dmesg | grep -i denied | tail           # or: ausearch -m avc -ts recent
+```
+
+  The most likely spot is the container bind mount of `$HOME/.ssh` (SELinux type `ssh_home_t`). If that is
+  the problem, fix it with the `:z` / `:Z` mount option — **not** by turning SELinux off entirely. Please
+  open an issue if you hit it; the conclusion will be added to `docs/DESIGN.md`.
+
+**Common symptoms, quick lookup**:
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| VM has internet but cannot reach machine-room devices | bridged to Wi-Fi / wrong bridge target | redo step 2 and bridge to the wired NIC |
+| no adapter, or it shows "not connected" | "Connected" not ticked in VM settings | tick "Connected" and "Connect at power on" |
+| changing bridge settings has no effect | VMware not started as administrator | restart elevated and change it again |
+| breaks after moving to another segment | still the old static IP / DHCP lease not renewed | change the static IP, or `dhclient -r && dhclient` |
+| odd behaviour while a VPN is up on the host | the VPN takes over routing, so bridging is no longer a direct link | disconnect the VPN temporarily, or use another control machine |
+| ping works but port 22 does not | sshd not running / firewall on the target | that is the target side; the framework reports `UNREACHABLE` |
+
+> The author's host split: **Wi-Fi for internet, the wired NIC dedicated to the machine-room segment** — the
+> two do not interfere.
 
 ## 3. Repository layout
 
@@ -257,7 +362,8 @@ agentless-fieldkit/
 │       ├── example.conf.template   template (only *.conf is loaded)
 │       └── *.conf                  real host lists: one file = one segment / password group
 ├── container/
-│   ├── ansible-2.9.tar.gz     control-node image for podman load (travels with the package, not the repo)
+│   ├── ansible-2.9.tar.gz     control-node image for podman load (not committed; download from the Release asset)
+│   ├── ansible-2.9.tar.gz.sha256  image checksum file (for `sha256sum -c`; ships with the repo)
 │   ├── sshpass_1.09-1_amd64.deb    package injected into the container on demand
 │   └── IMAGE-PROVENANCE.md    image provenance and verification record
 ├── ansible/
@@ -268,6 +374,7 @@ agentless-fieldkit/
 ├── docs/
 │   ├── DESIGN.md              design philosophy and per-module rationale
 │   ├── REVIEW.md              code review and fix record (findings / root causes / verification)
+│   ├── 实战记录.md            field-task template + lab measurements (Chinese)
 │   └── 故障排查.md             troubleshooting manual (Chinese)
 ├── output/                    per-run results (auto-created)
 └── tmp/                       intermediate state (inventory, socket dir; auto-created)
@@ -341,16 +448,22 @@ already; what is missing is the specific combination.**
 
 ### 5.2 Feature-by-feature (comparing *preconditions*, not feature counts)
 
-| Property | Plain Ansible | Puppet Bolt | pssh / clush / gosible | AWX / Spug / BlueKing | OliveTin | **This project** |
-|---|---|---|---|---|---|---|
-| Agentless (SSH) | yes | yes | yes | yes | — | yes |
-| **No server / platform / database** | yes | yes | yes | no | no | **yes** |
-| **Credentials can be tried on site and are burned after use** | no | no | no | no | no | **yes** |
-| **Zero-skill operator (two files + one command)** | no | no | no | partly | yes (buttons) | **yes** |
-| **Zero residue on targets is a hard constraint** | your problem | your problem | executes only | not handled | not handled | **yes** |
-| **Artifact retrieval + classification + reasons** | you write it | you write it | no | platform-side | no | **yes** |
-| **Chinese-language delivery package + self-test + verifiable image** | docs only | no | no | partly | no | **yes** |
-| Container-pinned control node | official EEs | — | inherently single-binary | official images | — | yes (**not original**) |
+| Property | Plain Ansible | Puppet Bolt | pssh / clush / gosible | Fabric / Capistrano (libraries) | AWX / Spug / BlueKing | OliveTin | **This project** |
+|---|---|---|---|---|---|---|---|
+| Agentless (SSH) | yes | yes | yes | yes | yes | — | yes |
+| **No server / platform / database** | yes | yes | yes | yes (pip install and go) | no | no | **yes** |
+| **Credentials can be tried on site and are burned after use** | no | no | no | no (you write it) | no | no | **yes** |
+| **Zero-skill operator (two files + one command)** | no | no | no | no (you write Python/Ruby) | partly | yes (buttons) | **yes** |
+| **Zero residue on targets is a hard constraint** | your problem | your problem | executes only | no (you write it) | not handled | not handled | **yes** |
+| **Artifact retrieval + classification + reasons** | you write it | you write it | no | no (you write it) | platform-side | no | **yes** |
+| **Chinese-language delivery package + self-test + verifiable image** | docs only | no | no | no | partly | no | **yes** |
+| Container-pinned control node | official EEs | — | inherently single-binary | — | official images | — | yes (**not original**) |
+
+> **Why the library row (Fabric / Capistrano) is all "you write it"**: they solve "run SSH commands from
+> Python / Ruby" — a *component-level* substitute. Swapping them in only replaces the execution engine; the
+> credential lifecycle, the funnel, zero residue, the artifact contract and the classification — everything
+> that makes up the *delivery form* — would still have to be built by hand, by an operator who can code.
+> They cannot replace this project's focus, and this project does not try to replace their flexibility.
 
 ### 5.3 Three things other projects already did first
 
