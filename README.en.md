@@ -166,7 +166,14 @@ wget https://github.com/krictfus/agentless-fieldkit/archive/refs/tags/v3.4.1.tar
 tar xzf v3.4.1.tar.gz && cd agentless-fieldkit-3.4.1
 ```
 
-The image is **not** in the source archive (excluded by `.gitignore`); download it separately from [Releases](https://github.com/krictfus/agentless-fieldkit/releases) — its sha256 is in the release notes and in `container/IMAGE-PROVENANCE.md`.
+The image is **not** in the source archive (excluded by `.gitignore`). The image is decoupled from the code
+version: it is always taken from the **v3.4.0** asset (later releases do not re-upload the same file):
+
+```bash
+wget https://github.com/krictfus/agentless-fieldkit/releases/download/v3.4.0/ansible-2.9.tar.gz
+sha256sum ansible-2.9.tar.gz   # expect ed5eb9e40f837cdc5df7f3376acf81bc11af26807776e672d040a1a8e160c395
+podman load -i ansible-2.9.tar.gz
+```
 
 ### 0. Prepare before you go (do this once, **where you have network access**)
 
@@ -323,6 +330,7 @@ already; what is missing is the specific combination.**
 | Agentless orchestration | Ansible, Puppet Bolt, pyinfra, salt-ssh | Manage many machines from one | The operator is a **trained sysadmin** |
 | Portable control node | **Ansible Execution Environments** (`ansible-builder`), AAP disconnected install | Package Ansible *with* its version in a container | — (container-pinned control nodes are **not** this project's invention) |
 | Parallel SSH runners | pdsh / clush / pssh, gosible, gossh, MobaXterm MultiExec | Fire commands and copy files in parallel | Trust is **already established** (key-based); no artifact handling |
+| Library-level SSH | **Fabric** (Python/Paramiko), **Capistrano** (Ruby) | SSH execution *libraries* for developers | The operator writes Python/Ruby; dependencies must be installable offline; credential lifecycle, zero-residue, artifact contract and classification are all yours to build |
 | Platforms | AWX / Semaphore, Spug, BlueKing JOB, JumpServer, Rundeck | Team-level batch execution + asset management | A server, a database, and credentials **already registered** |
 | Zero-skill for non-technical staff | **OliveTin** (commands as web buttons) | Let non-technical people run things | Needs a **permanently running server** |
 | Collection / CMDB | OCS Inventory (agentless SSH mode), GLPI, ansible-cmdb | Collect assets and produce reports | Long-running, database-backed |
@@ -404,7 +412,15 @@ established trust).
 ## 9. Recent changes
 
 The full changelog lives in [`VERSION`](VERSION) and is kept in **Chinese** — this project's Chinese
-documentation is the authoritative version. Highlights of the current release (**3.4.1**): a line-by-line
+documentation is the authoritative version.
+
+**3.4.2 — an interrupted run is no longer reported as success.** A late Ctrl-C during the execution phase
+used to leave a summary that looked complete. `run_playbook.sh` now keeps Ansible's real exit code,
+`summary.sh` prints a **⚠ incomplete** block at the top with the reason, `run.sh` exits non-zero and drops
+the success banner, and `selftest.sh` gained group [8]. Also: `docs/实战记录.md` is published, and the
+comparison table gained Fabric / Capistrano.
+
+Highlights of **3.4.1**: a line-by-line
 review fixed six defects that failed *silently* — the artifact counter assumed a payload filename, the host-list
 parser truncated passwords at `#` and kept the Windows `\r`, key recycling failed when `authorized_keys` was
 absent and deleted by a shared tag (breaking concurrent runs), and "already pushed" was decided by comment tag

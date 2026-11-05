@@ -5,6 +5,7 @@
 #   覆盖：[1] 脚本语法  [2] 载荷契约  [3] 主机清单  [4] 结果分类（含三层漏斗）
 #         [5] 临时凭据权限  [6] 运行环境（podman/镜像/sshpass）
 #         [7] 清单解析规则（口令含 # / 行尾 CRLF）
+#         [8] 中断语义（结果不完整检测）
 #   退出码：0 = 通过（可能带 WARN，需要你按提示处理）；1 = 有 NG
 #   ⚠ 不要在 run.sh 运行期间执行：本脚本会临时改写 conf/hosts/ 与 tmp/ 下的状态文件
 # ============================================================
@@ -22,7 +23,8 @@ TMPCONF="$HOSTS_DIR/zz-selftest.conf"
 cleanup_selftest() {
     rm -f "$TMPCONF" "$HOSTS_DIR/zz-selftest-parse.conf" \
           "$PKG_ROOT/tmp/precheck.fail" "$PKG_ROOT/tmp/push.fail" \
-          "$PKG_ROOT/tmp/precheck.ok" "$PKG_ROOT/tmp/push.ok" 2>/dev/null
+          "$PKG_ROOT/tmp/precheck.ok" "$PKG_ROOT/tmp/push.ok" \
+          "$PKG_ROOT/tmp/playbook.rc" 2>/dev/null
 }
 trap cleanup_selftest EXIT INT TERM
 
@@ -142,6 +144,55 @@ got2=$( source "$PKG_ROOT/lib/host_var.sh" >/dev/null 2>&1
     && ck OK "「空白 + #」仍按行尾注释剥离" \
     || ck NG "行尾注释解析异常：期望 10.0.0.8|pw，实际 $got2"
 rm -f "$PARSE_CONF"
+
+# ------------------------------------------------------------
+echo
+echo "[8] 中断语义（结果不完整检测）"
+mkdir -p "$PKG_ROOT/tmp"
+printf '10.0.0.5 root x x\n10.0.0.6 root x x\n' > "$TMPCONF"
+o8="$(mktemp -d)"
+sect8() { awk -v c="$1:" '$0==c{f=1;next} /^$/{f=0} f' "$o8/summary.txt"; }
+# 人造"执行阶段被中断"的现场：run.log 只有 PLAY 头、没有 PLAY RECAP；已拉回 1 份产物
+{
+    echo 'PLAY [批量任务执行] ****'
+    echo 'TASK [执行载荷] ****'
+} > "$o8/run.log"
+: > "$o8/10.0.0.5_report.html"
+echo 130 > "$PKG_ROOT/tmp/playbook.rc"
+bash "$PKG_ROOT/lib/summary.sh" "$o8" >/dev/null 2>&1
+grep -q '结果不完整' "$o8/summary.txt" \
+    && ck OK "无 PLAY RECAP 时 summary 顶部给出「结果不完整」告警" \
+    || ck NG "缺少「结果不完整」告警（中断会被当成成功）"
+grep -q 'podman/ansible 退出码 130' "$o8/summary.txt" \
+    && ck OK "告警中带出 playbook 退出码" \
+    || ck NG "告警未带出退出码"
+sect8 MISSING | grep -qx '10.0.0.5' \
+    && ck OK "中断时已拉回产物仍归 MISSING（分类不再伪装成功）" \
+    || ck NG "中断时分类异常"
+grep -q '可能因任务被中断' "$o8/summary.txt" \
+    && ck OK "MISSING 主机附「可能被中断」原因" \
+    || ck NG "MISSING 未附中断原因"
+
+# 判据独立性：删掉退出码文件后，"无 RECAP" 仍应判为不完整
+rm -f "$PKG_ROOT/tmp/playbook.rc"
+bash "$PKG_ROOT/lib/summary.sh" "$o8" >/dev/null 2>&1
+grep -q '结果不完整' "$o8/summary.txt" \
+    && ck OK "「无 RECAP」是独立判据（不依赖退出码文件）" \
+    || ck NG "删掉退出码文件后不再告警"
+
+# 不误报：完整 RECAP + 退出码 0 时不得告警
+printf 'PLAY RECAP ****\n10.0.0.5 : ok=4 changed=2 unreachable=0 failed=0 skipped=0 rescued=0 ignored=0\n10.0.0.6 : ok=4 changed=2 unreachable=0 failed=0 skipped=0 rescued=0 ignored=0\n' > "$o8/run.log"
+echo 0 > "$PKG_ROOT/tmp/playbook.rc"
+bash "$PKG_ROOT/lib/summary.sh" "$o8" >/dev/null 2>&1
+if grep -q '结果不完整' "$o8/summary.txt"; then
+    ck NG "正常跑完时误报「结果不完整」"
+else
+    ck OK "正常跑完时不误报"
+fi
+sect8 OK | grep -qx '10.0.0.5' && ck OK "正常跑完时分类为 OK" || ck NG "正常跑完时分类异常"
+rm -f "$PKG_ROOT/tmp/playbook.rc"
+cleanup_selftest
+rm -rf "$o8"
 
 # ------------------------------------------------------------
 echo

@@ -83,7 +83,15 @@ wget https://github.com/krictfus/agentless-fieldkit/archive/refs/tags/v3.4.1.tar
 tar xzf v3.4.1.tar.gz && cd agentless-fieldkit-3.4.1
 ```
 
-镜像**不在**源码包里（`.gitignore` 已排除），从 [Releases](https://github.com/krictfus/agentless-fieldkit/releases) 单独下载；sha256 见 Release 说明与 `container/IMAGE-PROVENANCE.md`。
+镜像**不在**源码包里（`.gitignore` 已排除）。**镜像与代码版本解耦**：控制端镜像固定取自 **v3.4.0** 的附件，后续版本不再重复上传同一份镜像：
+
+```bash
+wget https://github.com/krictfus/agentless-fieldkit/releases/download/v3.4.0/ansible-2.9.tar.gz
+sha256sum ansible-2.9.tar.gz   # 应为 ed5eb9e40f837cdc5df7f3376acf81bc11af26807776e672d040a1a8e160c395
+podman load -i ansible-2.9.tar.gz
+```
+
+镜像内部信息与核验方法见 `container/IMAGE-PROVENANCE.md`。
 
 ### 〇、现场前的准备（**在有网的环境做一次**）
 
@@ -242,6 +250,7 @@ agentless-fieldkit/
 ├── docs/
 │   ├── DESIGN.md              设计理念与逐模块设计理由
 │   ├── REVIEW.md              代码评审与修复记录（问题/根因/验证）
+│   ├── 实战记录.md            现场任务模板 + 实验室实测数据（含中断两路径）
 │   └── 故障排查.md            排障手册
 ├── output/                    每次运行的结果目录（自动创建）
 └── tmp/                       中间产物（inventory、套接字目录，自动创建）
@@ -306,6 +315,7 @@ run.sh
 | 无 agent 通用编排 | Ansible、Puppet Bolt、pyinfra、salt-ssh | 从一台机器批量管一堆机器 | 操作者是**专业运维**（会 YAML / Python / 命令） |
 | 控制端便携化 | **Ansible Execution Environments**（`ansible-builder` 构建的容器化控制节点）、Red Hat AAP 的 disconnected 部署 | 把 Ansible **连版本一起**装进容器 | ——（**"容器化钉版本"官方已有**，本框架沿用了同一思路） |
 | 并行 SSH 执行器 | pdsh / clush / pssh、gosible（Go 单文件）、gossh、rex、shellflow、MobaXterm MultiExec | 并行发命令、分发文件 | 信任关系**已建立**（免密），或人工逐台输口令；**不管产物** |
+| 库级 SSH 执行 | **Fabric**（Python/Paramiko）、**Capistrano**（Ruby） | 给开发者用的 SSH 执行**库**，可自由编排命令与文件传输 | 操作者**会写 Python / Ruby**；控制端能装依赖（pip 含 C 扩展，离线需自备 wheel 矩阵）；凭据生命周期、目标机零残留、产物契约、结果分类**全部要自己写** |
 | 平台型 | AWX / Semaphore、Spug、蓝鲸智云 JOB、JumpServer、Rundeck | 团队级批量执行 + 资产管理 | 有服务器、有数据库、凭据**已录入平台** |
 | 零门槛给非技术人 | **OliveTin**（把命令做成网页按钮） | 让不会命令的人点按钮执行 | 需要一台**常驻服务器**；机器与凭据**要先准备好** |
 | 采集 / CMDB | OCS Inventory（有 SSH 无 agent 模式）、GLPI、ansible-cmdb、各类巡检脚本 | 采集资产、生成报告 | 长期运行、要数据库 |
@@ -326,6 +336,9 @@ run.sh
 | **产物回收 + 分类 + 剔除原因** | 自己写 | 自己写 | ❌ | 平台侧有 | ❌ | **✅** |
 | **中文交付包 + 自检 + 镜像可核验** | 文档多 | ❌ | ❌ | 部分 | ❌ | **✅** |
 | 容器钉版本控制端 | ✅ 官方 EE | — | 单文件天然 | 官方镜像 | — | ✅（**非首创**） |
+
+> 补充一行（评审建议）：**Fabric / Capistrano** 属于上表之外的"库级"——它们连"结果分类、凭据生命周期、
+> 目标机零残留"都不提供，全部由使用者实现，并且要求操作者会写 Python / Ruby。已补进 5.1。
 
 ### 5.3 三个"已经有人做过"的单点
 
@@ -401,6 +414,13 @@ run.sh
   下发后增加一次真实免密登录验证、输出目录加 PID 防同秒碰撞。
   新增 [`docs/REVIEW.md`](docs/REVIEW.md)（问题清单 / 根因 / 修复 / 验证 / 已知残留），
   并在 `selftest.sh` 增加 [7] 清单解析规则断言。
+- **v3.4.2**：修复**中断语义**（外部评审 v2 实机发现）——执行阶段 Ctrl-C 不再被呈现为"成功完成"：
+  `run_playbook.sh` 捕获 ansible 真实退出码（此前被 `|| true` 吞成 0）、`summary.sh` 在"无日志 /
+  无 PLAY RECAP / 退出码非 0"时于 `summary.txt` **顶部**标注「⚠ 结果不完整」并说明原因、
+  `run.sh` 以非零码退出且不再打印"完成"横幅；`selftest.sh` 新增 [8] 中断语义断言。
+  同时：**重新发布** [`docs/实战记录.md`](docs/实战记录.md)（3.3.0 曾按"个人向"移除；本版改为
+  "现场模板 + 实验室实测数据，无个人信息"）、对比表补 Fabric / Capistrano、
+  明确"控制端镜像固定取自 v3.4.0"。
 
 ---
 

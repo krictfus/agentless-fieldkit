@@ -170,7 +170,8 @@ echo ""
 # 6. 三层漏斗 · 第三层：只对下发成功的主机执行任务
 # ============================================================
 info "三层漏斗 第三层：执行任务（容器内 ansible-playbook）"
-bash "$PKG_ROOT/lib/run_playbook.sh"
+TASK_RC=0
+bash "$PKG_ROOT/lib/run_playbook.sh" || TASK_RC=$?
 
 LATEST_OUTPUT=""
 if [ -d "$OUTPUT_ROOT" ]; then
@@ -181,7 +182,11 @@ fi
 if [ -z "$LATEST_OUTPUT" ] || [ ! -d "$LATEST_OUTPUT" ]; then
     err "未找到输出目录，任务可能失败"
 else
-    ok "任务执行完成，结果目录: $LATEST_OUTPUT"
+    if [ "$TASK_RC" -ne 0 ]; then
+        err "任务未完成（退出码 $TASK_RC）：结果可能不完整，见 summary.txt 顶部「⚠ 结果不完整」"
+    else
+        ok "任务执行完成，结果目录: $LATEST_OUTPUT"
+    fi
 fi
 echo ""
 
@@ -230,6 +235,16 @@ echo ""
 
 END_TIME="$(date '+%F %T')"
 echo "=================================================="
+if [ "$TASK_RC" -ne 0 ]; then
+    echo "  批量任务 —— 未完成（退出码 $TASK_RC）"
+    echo "  说明: 执行阶段被中断或失败，结果不完整（见 summary.txt 顶部提示）"
+    echo "  开始: $START_TIME"
+    echo "  结束: $END_TIME"
+    echo "  结果目录: $LATEST_OUTPUT"
+    echo "  日志文件: $LOG_FILE"
+    echo "=================================================="
+    exit "$TASK_RC"
+fi
 echo "  批量任务 —— 完成"
 echo "  开始: $START_TIME"
 echo "  结束: $END_TIME"

@@ -17,6 +17,7 @@
 | 容器基础系统 | **Ubuntu 20.04.6 LTS (Focal Fossa)** → 注入包请用 `.deb` |
 | 导出文件 | `container/ansible-2.9.tar.gz` = 146,130,523 字节 |
 | 导出文件 sha256 | `ed5eb9e40f837cdc5df7f3376acf81bc11af26807776e672d040a1a8e160c395` |
+| 固定分发地址 | `https://github.com/krictfus/agentless-fieldkit/releases/download/v3.4.0/ansible-2.9.tar.gz`（镜像与代码版本解耦：v3.4.0 之后不再重复上传同一份镜像） |
 
 > 交付说明：`ansible-2.9.tar.gz` 体积约 139 MB，**不在本构建目录内**
 > （避免与既有副本重复占用磁盘）。打包时从下面任一位置复制过来即可：

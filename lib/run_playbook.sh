@@ -5,6 +5,9 @@
 # ============================================================
 source "$(dirname "$0")/host_var.sh"
 
+# pipefail（R-08）：让 `podman exec ... | tee` 的返回值取 ansible 的退出码，而不是 tee 的
+set -o pipefail
+
 # 带 PID 后缀（P3-1）：同一秒内并发两次运行会共用目录，产物互相覆盖
 TIMESTAMP="$(date +%Y%m%d%H%M%S)_$$"
 OUTPUT_DIR="$OUTPUT_ROOT/$TIMESTAMP"
@@ -33,6 +36,10 @@ for entry in "${ENTRIES[@]}"; do
 done
 echo "[*] inventory 已生成: $INVENTORY_FILE（$(grep -c . "$INVENTORY_FILE" 2>/dev/null || echo 0) 台，权限 $(stat -c %a "$INVENTORY_FILE" 2>/dev/null)）"
 
+# ---------- 记录 playbook 退出码（给 summary.sh / run.sh 判断“是否跑完”） ----------
+PLAYBOOK_RC_FILE="$TMP_DIR/playbook.rc"
+echo 0 > "$PLAYBOOK_RC_FILE"
+
 # ---------- 没有任何主机可执行：跳过 ansible，直接汇总 ----------
 if [ ! -s "$INVENTORY_FILE" ]; then
     echo "[!] 没有任何主机进入执行阶段（全部被预检或认证阶段剔除），跳过 ansible-playbook"
@@ -48,7 +55,14 @@ podman exec -i "$CONTAINER_NAME" bash -c "
     cd '$PKG_ROOT'
     export ANSIBLE_CONFIG='$ANSIBLE_DIR/ansible.cfg'
     ansible-playbook -i '$INVENTORY_FILE' -e 'output_dir=$OUTPUT_DIR' '$ANSIBLE_DIR/playbook.yml'
-" 2>&1 | tee "$OUTPUT_DIR/run.log" || true
+" 2>&1 | tee "$OUTPUT_DIR/run.log"
+# 紧跟管道取 ansible 自身的退出码（tee 恒为 0，不能代表执行结果）
+PLAYBOOK_RC=${PIPESTATUS[0]}
+echo "$PLAYBOOK_RC" > "$PLAYBOOK_RC_FILE"
+if [ "$PLAYBOOK_RC" -ne 0 ]; then
+    echo ""
+    echo "[!] ansible-playbook 退出码 $PLAYBOOK_RC —— 结果可能不完整（详见 summary.txt 顶部提示）"
+fi
 
 # ---------- 自动汇总 ----------
 echo ""
@@ -58,3 +72,6 @@ bash "$(dirname "$0")/summary.sh" "$OUTPUT_DIR"
 echo ""
 echo "[*] 完成。结果目录: $OUTPUT_DIR"
 ls -l "$OUTPUT_DIR"
+
+# 0 = 正常跑完；非 0 = 被中断或失败 → 由 run.sh 决定是否打“完成”横幅
+exit "${PLAYBOOK_RC:-0}"

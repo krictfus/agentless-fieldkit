@@ -25,6 +25,32 @@ if [ -z "$OUTPUT_DIR" ] || [ ! -d "$OUTPUT_DIR" ]; then
 fi
 echo "[*] 汇总目录: $OUTPUT_DIR"
 
+# ---------- 本次执行是否“跑完”（R-08 中断语义） ----------
+# 两条判据任一成立即视为不完整：① run.log 无 PLAY RECAP；② playbook 退出码非 0
+RC_FILE="$TMP_DIR/playbook.rc"
+PLAYBOOK_RC=""
+[ -f "$RC_FILE" ] && PLAYBOOK_RC="$(tr -dc '0-9' < "$RC_FILE" 2>/dev/null)"
+HAS_RECAP=0
+if [ -s "$OUTPUT_DIR/run.log" ] && grep -q '^PLAY RECAP' "$OUTPUT_DIR/run.log" 2>/dev/null; then HAS_RECAP=1; fi
+INCOMPLETE=0
+INCOMPLETE_REASON=""
+if [ ! -s "$OUTPUT_DIR/run.log" ]; then
+    # 连日志都没有：多半在进入执行阶段前后就被中断了
+    INCOMPLETE=1
+    INCOMPLETE_REASON="执行阶段没有产出日志（运行在中途被中断，或 ansible 未启动）"
+elif [ "$HAS_RECAP" -eq 0 ]; then
+    INCOMPLETE=1
+    INCOMPLETE_REASON="run.log 中没有 PLAY RECAP（执行被中断，或 ansible 未跑完）"
+fi
+if [ -n "$PLAYBOOK_RC" ] && [ "$PLAYBOOK_RC" != "0" ]; then
+    INCOMPLETE=1
+    if [ -n "$INCOMPLETE_REASON" ]; then
+        INCOMPLETE_REASON="$INCOMPLETE_REASON；podman/ansible 退出码 $PLAYBOOK_RC"
+    else
+        INCOMPLETE_REASON="podman/ansible 退出码 $PLAYBOOK_RC"
+    fi
+fi
+
 # ---------- 漏斗前两层的淘汰名单 ----------
 declare -A FILTERED=() FILTER_NOTE=()
 if [ -f "$PRECHECK_FAIL_FILE" ]; then
@@ -87,6 +113,9 @@ for entry in "${HOSTS[@]}"; do
             echo "$line"
         else
             echo "$HOST_IP MISSING"
+            if [ "$INCOMPLETE" -eq 1 ]; then
+                echo "$HOST_IP : 未出现在 PLAY RECAP —— 可能因任务被中断或 ansible 未跑完（run.log 不完整）" >> "$REASONF"
+            fi
         fi
     fi
 done > "$TMPF"
@@ -94,6 +123,12 @@ done > "$TMPF"
 # ---------- 写 summary.txt ----------
 SUMMARY_FILE="$OUTPUT_DIR/summary.txt"
 {
+    if [ "$INCOMPLETE" -eq 1 ]; then
+        echo "⚠ 结果不完整 —— 任务没有正常跑完"
+        echo "  原因: $INCOMPLETE_REASON"
+        echo "  请勿把本文件当作「任务已完成」的交付依据；要完整结果请重跑。"
+        echo ""
+    fi
     echo "=== 三层漏斗统计 ==="
     echo "清单总数            : ${#HOSTS[@]}"
     echo "第一层 预检剔除(不可达): $(count_lines "$PRECHECK_FAIL_FILE")"
@@ -115,6 +150,11 @@ SUMMARY_FILE="$OUTPUT_DIR/summary.txt"
     if [ -f "$OUTPUT_DIR/run.log" ] && grep -q 'PAYLOAD_NO_ARTIFACT' "$OUTPUT_DIR/run.log" 2>/dev/null; then
         echo "诊断提示: 出现 PAYLOAD_NO_ARTIFACT —— 载荷执行成功但没有生成产物文件。"
         echo "          请对照 payload/README.md 检查载荷契约；这类 FAILED 不是网络或口令问题。"
+        echo ""
+    fi
+    if [ "$INCOMPLETE" -eq 1 ]; then
+        echo "诊断提示: 本次执行没有正常跑完（见顶部 ⚠）。已拉回的产物文件本身可能是完整的，"
+        echo "          但分类结果与 MISSING 仅供参考；请重跑以获得可信结果。"
         echo ""
     fi
 } > "$SUMMARY_FILE"
